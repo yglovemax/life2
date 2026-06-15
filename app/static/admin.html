@@ -18,7 +18,7 @@
       <nav>
         <button class="active" data-view="modules">模块中心</button>
         <button data-view="test-center">测试中心</button>
-        <button>知识库</button>
+        <button data-view="knowledge">知识库</button>
         <button>成本中心</button>
         <button>发布中心</button>
         <button>安全审计</button>
@@ -127,6 +127,88 @@
             <section class="section">
               <h3>最近调用记录</h3>
               <div id="recentTraceList" class="trace-list"></div>
+            </section>
+          </div>
+        </section>
+      </section>
+
+      <section class="layout hidden" id="knowledgeView">
+        <section class="panel module-center">
+          <div class="panel-head">
+            <div>
+              <p>Knowledge Base</p>
+              <h2>知识库</h2>
+            </div>
+            <button class="primary compact" id="saveMarkdownButton">上传 Markdown</button>
+          </div>
+          <div class="detail-body">
+            <section>
+              <h3>上传 Markdown 文档</h3>
+              <div class="form-grid">
+                <label>资料名称
+                  <input id="knowledgeTitle" placeholder="例如：白羊座知识库" />
+                </label>
+                <label>标签
+                  <input id="knowledgeTags" placeholder="占星, 白羊座, 表达规则" />
+                </label>
+                <label class="wide">Markdown 内容
+                  <textarea id="knowledgeContent" placeholder="# 白羊座&#10;白羊座强调行动力和开端。"></textarea>
+                </label>
+              </div>
+            </section>
+
+            <section class="section">
+              <h3>人工录入知识条目</h3>
+              <div class="form-grid">
+                <label>条目标题
+                  <input id="manualKnowledgeTitle" placeholder="例如：日运表达规则" />
+                </label>
+                <label>标签
+                  <input id="manualKnowledgeTags" placeholder="日运, 表达规则" />
+                </label>
+                <label class="wide">条目内容
+                  <textarea id="manualKnowledgeContent" placeholder="日运输出需要有行动建议，并避免绝对化承诺。"></textarea>
+                </label>
+              </div>
+              <div class="actions">
+                <button class="secondary" id="saveManualKnowledgeButton">保存人工条目</button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel detail">
+          <div class="panel-head">
+            <div>
+              <p>Search & Sources</p>
+              <h2>检索与来源</h2>
+            </div>
+            <button class="secondary compact" id="refreshKnowledgeButton">刷新</button>
+          </div>
+          <div class="detail-body">
+            <div id="knowledgeNotice"></div>
+            <section>
+              <h3>轻量检索</h3>
+              <div class="form-grid">
+                <label>关键词
+                  <input id="knowledgeQuery" placeholder="行动力 / 安全边界 / 日运" />
+                </label>
+                <label>标签过滤
+                  <input id="knowledgeSearchTags" placeholder="占星, 白羊座" />
+                </label>
+              </div>
+              <div class="actions">
+                <button class="primary compact" id="searchKnowledgeButton">检索</button>
+              </div>
+              <div class="trace-list" id="knowledgeSearchResults"></div>
+            </section>
+            <section class="section">
+              <h3>资料来源</h3>
+              <div class="trace-list" id="knowledgeSources"></div>
+            </section>
+            <section class="section">
+              <h3>知识片段</h3>
+              <div class="trace-list" id="knowledgeChunks"></div>
             </section>
           </div>
         </section>

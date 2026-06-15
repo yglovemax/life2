@@ -1,7 +1,7 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.models import CallTrace, FieldContract, ModelConfig, Module, Page, PromptTemplate
+from app.models import CallTrace, FieldContract, KnowledgeChunk, KnowledgeSource, ModelConfig, Module, Page, PromptTemplate
 
 
 PROMPT_KEYS = [
@@ -114,6 +114,161 @@ def list_models(session: Session) -> list[dict]:
 
 def list_test_users() -> list[dict]:
     return DEMO_TEST_USERS
+
+
+def create_knowledge_source(session: Session, payload: dict) -> dict:
+    title = (payload.get("title") or "未命名资料").strip()
+    content = payload.get("content") or ""
+    tags = normalize_tags(payload.get("tags") or [])
+    source = KnowledgeSource(
+        title=title,
+        source_type=payload.get("source_type") or "markdown",
+        content=content,
+        tags=tags,
+        status="active",
+    )
+    session.add(source)
+    session.flush()
+
+    chunks = chunk_markdown(title, content)
+    for index, chunk in enumerate(chunks, start=1):
+        session.add(
+            KnowledgeChunk(
+                source_id=source.id,
+                title=chunk["title"],
+                content=chunk["content"],
+                tags=tags,
+                chunk_index=index,
+            )
+        )
+    source.chunk_count = len(chunks)
+    session.commit()
+    session.refresh(source)
+    return serialize_source(source)
+
+
+def create_manual_knowledge_entry(session: Session, payload: dict) -> dict:
+    source_payload = {
+        "title": payload.get("title") or "人工知识条目",
+        "source_type": "manual",
+        "content": payload.get("content") or "",
+        "tags": payload.get("tags") or [],
+    }
+    source_data = create_knowledge_source(session, source_payload)
+    chunks = list_knowledge_chunks(session, tag=None, source_id=source_data["id"])
+    return chunks[0] if chunks else source_data
+
+
+def list_knowledge_sources(session: Session) -> list[dict]:
+    sources = session.scalars(select(KnowledgeSource).order_by(KnowledgeSource.created_at.desc())).all()
+    return [serialize_source(source) for source in sources]
+
+
+def list_knowledge_chunks(session: Session, tag: str | None = None, source_id: int | None = None) -> list[dict]:
+    chunks = session.scalars(select(KnowledgeChunk).order_by(KnowledgeChunk.created_at.desc())).all()
+    rows = [serialize_chunk(chunk) for chunk in chunks]
+    if source_id is not None:
+        rows = [row for row in rows if row["source_id"] == source_id]
+    if tag:
+        rows = [row for row in rows if tag in row["tags"]]
+    return rows
+
+
+def search_knowledge(session: Session, payload: dict) -> list[dict]:
+    query = (payload.get("query") or "").strip().lower()
+    tags = normalize_tags(payload.get("tags") or [])
+    limit = int(payload.get("limit") or 8)
+    chunks = list_knowledge_chunks(session)
+    scored: list[tuple[int, dict]] = []
+    for chunk in chunks:
+        if tags and not set(tags).intersection(set(chunk["tags"])):
+            continue
+        haystack = f"{chunk['title']}\n{chunk['content']}".lower()
+        score = 0
+        if query and query in haystack:
+            score += 5
+        score += len(set(tags).intersection(set(chunk["tags"])))
+        if not query and score == 0 and tags:
+            score = 1
+        if score > 0 or (not query and not tags):
+            scored.append((score, chunk))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [chunk for _, chunk in scored[:limit]]
+
+
+def retrieve_knowledge_hits(session: Session, tags: list, input_payload: dict, limit: int = 3) -> list[dict]:
+    query_terms = [
+        input_payload.get("sun_sign"),
+        input_payload.get("moon_sign"),
+        input_payload.get("rising_sign"),
+        input_payload.get("topic"),
+    ]
+    query = " ".join(str(term) for term in query_terms if term)
+    hits = search_knowledge(session, {"query": query, "tags": tags, "limit": limit})
+    if not hits and tags:
+        hits = search_knowledge(session, {"query": "", "tags": tags, "limit": limit})
+    return hits
+
+
+def serialize_source(source: KnowledgeSource) -> dict:
+    return {
+        "id": source.id,
+        "title": source.title,
+        "source_type": source.source_type,
+        "status": source.status,
+        "tags": source.tags,
+        "chunk_count": source.chunk_count,
+        "created_at": source.created_at.isoformat(),
+    }
+
+
+def serialize_chunk(chunk: KnowledgeChunk) -> dict:
+    return {
+        "id": chunk.id,
+        "source_id": chunk.source_id,
+        "title": chunk.title,
+        "content": chunk.content,
+        "tags": chunk.tags,
+        "chunk_index": chunk.chunk_index,
+        "created_at": chunk.created_at.isoformat(),
+    }
+
+
+def normalize_tags(tags: list | str) -> list[str]:
+    if isinstance(tags, str):
+        candidates = tags.replace("，", ",").split(",")
+    else:
+        candidates = tags
+    return [str(tag).strip() for tag in candidates if str(tag).strip()]
+
+
+def chunk_markdown(default_title: str, content: str) -> list[dict]:
+    chunks: list[dict] = []
+    current_title = default_title
+    current_lines: list[str] = []
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if line.startswith("#"):
+            if current_lines:
+                chunks.extend(chunk_paragraphs(current_title, "\n".join(current_lines)))
+                current_lines = []
+            current_title = line.lstrip("#").strip() or default_title
+        elif line:
+            current_lines.append(line)
+        else:
+            if current_lines:
+                chunks.extend(chunk_paragraphs(current_title, "\n".join(current_lines)))
+                current_lines = []
+    if current_lines:
+        chunks.extend(chunk_paragraphs(current_title, "\n".join(current_lines)))
+    if not chunks and content.strip():
+        chunks.append({"title": default_title, "content": content.strip()})
+    return chunks or [{"title": default_title, "content": ""}]
+
+
+def chunk_paragraphs(title: str, text: str) -> list[dict]:
+    paragraphs = [part.strip() for part in text.split("\n\n") if part.strip()]
+    return [{"title": title, "content": paragraph} for paragraph in paragraphs]
 
 
 def get_module_detail(session: Session, module_id: int) -> dict | None:
@@ -287,6 +442,7 @@ def serialize_call(call: CallTrace) -> dict:
         "estimated_cost_cents": call.estimated_cost_cents,
         "manual_score": call.manual_score,
         "reviewer_notes": call.reviewer_notes,
+        "knowledge_hits": call.knowledge_hits or [],
         "created_at": call.created_at.isoformat(),
     }
 
@@ -307,11 +463,13 @@ def run_module_test(session: Session, module_id: int, payload: dict) -> dict | N
         if override_model is not None:
             model_name = override_model.display_name
     input_payload = payload.get("input_payload") or {}
+    knowledge_hits = retrieve_knowledge_hits(session, module.knowledge_tags or [], input_payload)
     model_request = "\n\n".join(
         [
             prompt.shared_prefix,
             prompt.module_rules,
             f"算法数据: {input_payload}",
+            f"知识库命中: {knowledge_hits}",
             prompt.user_preferences_template,
             prompt.final_request_template,
         ]
@@ -323,6 +481,7 @@ def run_module_test(session: Session, module_id: int, payload: dict) -> dict | N
         "title": module.name,
         "summary": summary,
         "fields": {field.field_name: field.example for field in module.fields},
+        "knowledge_hits": knowledge_hits,
     }
     raw_response = {
         "title": module.name,
@@ -344,6 +503,7 @@ def run_module_test(session: Session, module_id: int, payload: dict) -> dict | N
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         estimated_cost_cents=estimate_cost_cents(input_tokens, output_tokens),
+        knowledge_hits=knowledge_hits,
     )
     session.add(trace)
     session.commit()

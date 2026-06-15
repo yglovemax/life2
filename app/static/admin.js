@@ -2,6 +2,8 @@ let modules = [];
 let pages = [];
 let modelConfigs = [];
 let testUsers = [];
+let knowledgeSources = [];
+let knowledgeChunks = [];
 let selectedModuleId = null;
 let currentDetail = null;
 let draftFields = [];
@@ -422,7 +424,9 @@ function showView(view) {
   });
   document.querySelector("#moduleView").classList.toggle("hidden", view !== "modules");
   document.querySelector("#testCenterView").classList.toggle("hidden", view !== "test-center");
+  document.querySelector("#knowledgeView").classList.toggle("hidden", view !== "knowledge");
   if (view === "test-center") renderTestCenter();
+  if (view === "knowledge") renderKnowledgeWorkspace();
 }
 
 function renderTestCenter() {
@@ -558,13 +562,128 @@ async function scoreTrace(traceId) {
   await loadRecentTraces();
 }
 
+function setupKnowledgeActions() {
+  document.querySelector("#saveMarkdownButton").onclick = saveMarkdownKnowledge;
+  document.querySelector("#saveManualKnowledgeButton").onclick = saveManualKnowledge;
+  document.querySelector("#searchKnowledgeButton").onclick = searchKnowledge;
+  document.querySelector("#refreshKnowledgeButton").onclick = renderKnowledgeWorkspace;
+}
+
+async function renderKnowledgeWorkspace() {
+  await loadKnowledgeData();
+  renderKnowledgeSources();
+  renderKnowledgeChunks();
+}
+
+async function loadKnowledgeData() {
+  const [sourcesData, chunksData] = await Promise.all([getJson("/api/knowledge-sources"), getJson("/api/knowledge-chunks")]);
+  knowledgeSources = sourcesData.items;
+  knowledgeChunks = chunksData.items;
+}
+
+async function saveMarkdownKnowledge() {
+  const notice = document.querySelector("#knowledgeNotice");
+  try {
+    const payload = {
+      title: document.querySelector("#knowledgeTitle").value.trim() || "未命名 Markdown 资料",
+      source_type: "markdown",
+      content: document.querySelector("#knowledgeContent").value,
+      tags: parseTags("#knowledgeTags"),
+    };
+    if (!payload.content.trim()) throw new Error("Markdown 内容不能为空");
+    const saved = await getJson("/api/knowledge-sources", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    notice.innerHTML = `<div class="notice">已上传「${escapeHtml(saved.title)}」，生成 ${saved.chunk_count} 个知识片段</div>`;
+    document.querySelector("#knowledgeTitle").value = "";
+    document.querySelector("#knowledgeContent").value = "";
+    await renderKnowledgeWorkspace();
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function saveManualKnowledge() {
+  const notice = document.querySelector("#knowledgeNotice");
+  try {
+    const payload = {
+      title: document.querySelector("#manualKnowledgeTitle").value.trim() || "人工知识条目",
+      content: document.querySelector("#manualKnowledgeContent").value,
+      tags: parseTags("#manualKnowledgeTags"),
+    };
+    if (!payload.content.trim()) throw new Error("条目内容不能为空");
+    const saved = await getJson("/api/knowledge-entries", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    notice.innerHTML = `<div class="notice">人工条目「${escapeHtml(saved.title)}」已入库</div>`;
+    document.querySelector("#manualKnowledgeTitle").value = "";
+    document.querySelector("#manualKnowledgeContent").value = "";
+    await renderKnowledgeWorkspace();
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function searchKnowledge() {
+  const notice = document.querySelector("#knowledgeNotice");
+  try {
+    const data = await getJson("/api/knowledge/search", {
+      method: "POST",
+      body: JSON.stringify({
+        query: document.querySelector("#knowledgeQuery").value,
+        tags: parseTags("#knowledgeSearchTags"),
+        limit: 8,
+      }),
+    });
+    document.querySelector("#knowledgeSearchResults").innerHTML = data.items.length
+      ? data.items.map(knowledgeChunkCard).join("")
+      : '<p class="empty">没有检索到知识片段。</p>';
+    notice.innerHTML = `<div class="notice">检索完成，命中 ${data.items.length} 条</div>`;
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderKnowledgeSources() {
+  document.querySelector("#knowledgeSources").innerHTML = knowledgeSources.length
+    ? knowledgeSources.map(knowledgeSourceCard).join("")
+    : '<p class="empty">还没有资料来源。</p>';
+}
+
+function renderKnowledgeChunks() {
+  document.querySelector("#knowledgeChunks").innerHTML = knowledgeChunks.length
+    ? knowledgeChunks.slice(0, 20).map(knowledgeChunkCard).join("")
+    : '<p class="empty">还没有知识片段。</p>';
+}
+
+function knowledgeSourceCard(source) {
+  return `<article class="trace-card">
+    <span>#${source.id} · ${escapeHtml(source.source_type)} · ${escapeHtml(source.status)}</span>
+    <p><strong>${escapeHtml(source.title)}</strong></p>
+    <p>标签：${escapeHtml((source.tags || []).join(", "))}</p>
+    <p>知识片段：${source.chunk_count}</p>
+  </article>`;
+}
+
+function knowledgeChunkCard(chunk) {
+  return `<article class="trace-card">
+    <span>#${chunk.id} · source ${chunk.source_id} · ${escapeHtml((chunk.tags || []).join(", "))}</span>
+    <p><strong>${escapeHtml(chunk.title)}</strong></p>
+    <p>${escapeHtml(chunk.content)}</p>
+  </article>`;
+}
+
 async function boot() {
   setupNavigation();
+  setupKnowledgeActions();
   document.querySelector("#createModuleButton").onclick = newModuleDraft;
   await loadMetadata();
   await loadMetrics();
   await loadModules();
   renderTestCenter();
+  await loadKnowledgeData();
 }
 
 boot();

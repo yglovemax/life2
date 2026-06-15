@@ -137,6 +137,7 @@ class CallTrace(Base):
     estimated_cost_cents: Mapped[int] = mapped_column(Integer, default=0)
     manual_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reviewer_notes: Mapped[str] = mapped_column(Text, default="")
+    knowledge_hits: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     module: Mapped[Module] = relationship(back_populates="calls")
@@ -168,3 +169,32 @@ class Issue(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     module: Mapped[Module] = relationship(back_populates="issues")
+
+
+class KnowledgeSource(Base):
+    __tablename__ = "knowledge_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(180))
+    source_type: Mapped[str] = mapped_column(String(40), default="markdown")
+    status: Mapped[str] = mapped_column(String(40), default="active")
+    content: Mapped[str] = mapped_column(Text, default="")
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    chunks: Mapped[list[KnowledgeChunk]] = relationship(back_populates="source", cascade="all, delete-orphan")
+
+
+class KnowledgeChunk(Base):
+    __tablename__ = "knowledge_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("knowledge_sources.id"), index=True)
+    title: Mapped[str] = mapped_column(String(180))
+    content: Mapped[str] = mapped_column(Text, default="")
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    chunk_index: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    source: Mapped[KnowledgeSource] = relationship(back_populates="chunks")

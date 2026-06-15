@@ -249,3 +249,72 @@ def test_call_trace_can_be_scored_and_keeps_review_notes():
     data = response.json()
     assert data["manual_score"] == 4
     assert data["reviewer_notes"] == "语气可用，字段完整。"
+
+
+def test_markdown_knowledge_source_upload_chunks_and_searches_by_tag():
+    response = client.post(
+        "/api/knowledge-sources",
+        json={
+            "title": "白羊座知识库",
+            "source_type": "markdown",
+            "content": "# 白羊座\n白羊座强调行动力和开端。\n\n## 咨询表达\n适合给出直接、清晰的行动建议。",
+            "tags": ["占星", "白羊座"],
+        },
+    )
+    assert response.status_code == 200
+    source = response.json()
+    assert source["title"] == "白羊座知识库"
+    assert source["chunk_count"] >= 2
+
+    search_response = client.post(
+        "/api/knowledge/search",
+        json={"query": "行动力", "tags": ["白羊座"], "limit": 5},
+    )
+    assert search_response.status_code == 200
+    results = search_response.json()["items"]
+    assert results
+    assert any("行动力" in item["content"] for item in results)
+
+
+def test_manual_knowledge_entry_can_be_created_and_listed():
+    response = client.post(
+        "/api/knowledge-entries",
+        json={
+            "title": "日运表达规则",
+            "content": "日运输出需要有行动建议，并避免绝对化承诺。",
+            "tags": ["日运", "表达规则"],
+        },
+    )
+    assert response.status_code == 200
+    entry = response.json()
+    assert entry["title"] == "日运表达规则"
+    assert entry["tags"] == ["日运", "表达规则"]
+
+    list_response = client.get("/api/knowledge-chunks?tag=日运")
+    assert list_response.status_code == 200
+    assert any(item["title"] == "日运表达规则" for item in list_response.json()["items"])
+
+
+def test_module_test_records_knowledge_hits_for_matching_tags():
+    client.post(
+        "/api/knowledge-sources",
+        json={
+            "title": "占星通用安全规则",
+            "source_type": "markdown",
+            "content": "# 安全边界\n占星解读必须避免医疗、法律和投资承诺。",
+            "tags": ["占星", "安全边界"],
+        },
+    )
+    module_id = client.get("/api/modules").json()["items"][0]["id"]
+    trace = client.post(
+        f"/api/modules/{module_id}/test-run",
+        json={
+            "test_user": "demo_user_001",
+            "date": "2026-06-15",
+            "input_payload": {"sun_sign": "白羊座"},
+        },
+    ).json()
+
+    assert trace["knowledge_hits"]
+    assert trace["knowledge_hits"][0]["title"]
+    assert "安全边界" in trace["knowledge_hits"][0]["tags"] or "占星" in trace["knowledge_hits"][0]["tags"]

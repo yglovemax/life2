@@ -46,6 +46,8 @@ def ensure_sqlite_columns() -> None:
         statements.append("ALTER TABLE call_traces ADD COLUMN manual_score INTEGER")
     if "reviewer_notes" not in existing:
         statements.append("ALTER TABLE call_traces ADD COLUMN reviewer_notes TEXT DEFAULT ''")
+    if "knowledge_hits" not in existing:
+        statements.append("ALTER TABLE call_traces ADD COLUMN knowledge_hits JSON DEFAULT '[]'")
     if not statements:
         return
     with engine.begin() as connection:
