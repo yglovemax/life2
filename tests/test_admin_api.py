@@ -318,3 +318,83 @@ def test_module_test_records_knowledge_hits_for_matching_tags():
     assert trace["knowledge_hits"]
     assert trace["knowledge_hits"][0]["title"]
     assert "安全边界" in trace["knowledge_hits"][0]["tags"] or "占星" in trace["knowledge_hits"][0]["tags"]
+
+
+def test_cost_summary_groups_calls_by_page_module_and_model():
+    module = client.get("/api/modules").json()["items"][0]
+    trace = client.post(
+        f"/api/modules/{module['id']}/test-run",
+        json={
+            "test_user": "demo_user_001",
+            "date": "2026-06-15",
+            "input_payload": {"sun_sign": "白羊座", "nickname": "max"},
+        },
+    ).json()
+
+    response = client.get("/api/costs/summary")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["total_cost_cents"] >= trace["estimated_cost_cents"]
+    assert data["total_calls"] >= 1
+    assert any(item["page_name"] == module["page_name"] for item in data["by_page"])
+    assert any(item["module_id"] == module["id"] and item["cost_cents"] >= trace["estimated_cost_cents"] for item in data["by_module"])
+    assert any(item["model_name"] == trace["model_name"] for item in data["by_model"])
+
+
+def test_forced_fallback_test_run_uses_module_fallback_and_creates_alert():
+    module = client.get("/api/modules").json()["items"][0]
+    detail = client.get(f"/api/modules/{module['id']}").json()
+
+    response = client.post(
+        f"/api/modules/{module['id']}/test-run",
+        json={
+            "test_user": "demo_user_001",
+            "date": "2026-06-15",
+            "force_fallback": True,
+            "fallback_reason": "model_timeout",
+            "input_payload": {"sun_sign": "白羊座"},
+        },
+    )
+
+    assert response.status_code == 200
+    trace = response.json()
+    assert trace["status"] == "fallback"
+    assert trace["fallback_triggered"] is True
+    assert trace["fallback_reason"] == "model_timeout"
+    assert trace["final_json"]["fallback"] is True
+    assert detail["fallback_content"] in trace["final_json"]["summary"]
+
+    alerts = client.get("/api/fallback-alerts").json()["items"]
+    assert any(item["trace_id"] == trace["id"] and item["reason"] == "model_timeout" for item in alerts)
+
+
+def test_publish_and_rollback_create_module_versions_and_update_status():
+    module_id = client.get("/api/modules").json()["items"][0]["id"]
+    before = client.get(f"/api/modules/{module_id}").json()
+
+    publish_response = client.post(
+        f"/api/modules/{module_id}/publish",
+        json={"status": "gray", "operator": "qa", "notes": "进入灰度验证"},
+    )
+    assert publish_response.status_code == 200
+    published = publish_response.json()
+    assert published["status"] == "gray"
+    assert published["version"] == before["version"] + 1
+    assert published["versions"][0]["status"] == "gray"
+    assert published["versions"][0]["snapshot"]["notes"] == "进入灰度验证"
+
+    rollback_response = client.post(
+        f"/api/modules/{module_id}/rollback",
+        json={"operator": "qa", "reason": "灰度结果不稳定"},
+    )
+    assert rollback_response.status_code == 200
+    rolled_back = rollback_response.json()
+    assert rolled_back["status"] == "rolled_back"
+    assert rolled_back["version"] == published["version"] + 1
+
+    versions_response = client.get(f"/api/modules/{module_id}/versions")
+    assert versions_response.status_code == 200
+    versions = versions_response.json()["items"]
+    assert versions[0]["status"] == "rolled_back"
+    assert any(item["status"] == "gray" for item in versions)

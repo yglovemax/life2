@@ -19,8 +19,8 @@
         <button class="active" data-view="modules">模块中心</button>
         <button data-view="test-center">测试中心</button>
         <button data-view="knowledge">知识库</button>
-        <button>成本中心</button>
-        <button>发布中心</button>
+        <button data-view="cost-center">成本中心</button>
+        <button data-view="release-center">发布中心</button>
         <button>安全审计</button>
       </nav>
     </aside>
@@ -210,6 +210,104 @@
               <h3>知识片段</h3>
               <div class="trace-list" id="knowledgeChunks"></div>
             </section>
+          </div>
+        </section>
+      </section>
+
+      <section class="layout hidden" id="costCenterView">
+        <section class="panel module-center">
+          <div class="panel-head">
+            <div>
+              <p>Cost Center</p>
+              <h2>成本中心</h2>
+            </div>
+            <button class="secondary compact" id="refreshCostsButton">刷新</button>
+          </div>
+          <div class="detail-body">
+            <div id="costNotice"></div>
+            <section>
+              <h3>成本总览</h3>
+              <div class="insight-grid" id="costSummaryCards"></div>
+            </section>
+            <section class="section">
+              <h3>按页面统计</h3>
+              <div class="trace-list" id="costByPage"></div>
+            </section>
+            <section class="section">
+              <h3>按模型统计</h3>
+              <div class="trace-list" id="costByModel"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel detail">
+          <div class="panel-head">
+            <div>
+              <p>Fallback Watch</p>
+              <h2>降级告警</h2>
+            </div>
+          </div>
+          <div class="detail-body">
+            <section>
+              <h3>高成本模块</h3>
+              <div class="trace-list" id="costByModule"></div>
+            </section>
+            <section class="section">
+              <h3>最近 Fallback</h3>
+              <div class="trace-list" id="fallbackAlerts"></div>
+            </section>
+          </div>
+        </section>
+      </section>
+
+      <section class="layout hidden" id="releaseCenterView">
+        <section class="panel module-center">
+          <div class="panel-head">
+            <div>
+              <p>Release Center</p>
+              <h2>发布中心</h2>
+            </div>
+            <button class="secondary compact" id="refreshReleaseButton">刷新</button>
+          </div>
+          <div class="detail-body">
+            <div id="releaseNotice"></div>
+            <section>
+              <h3>模块发布操作</h3>
+              <div class="form-grid">
+                <label class="wide">模块
+                  <select id="releaseModule"></select>
+                </label>
+                <label>目标状态
+                  <select id="releaseStatus"></select>
+                </label>
+                <label>操作人
+                  <input id="releaseOperator" value="admin" />
+                </label>
+                <label class="wide">发布备注
+                  <textarea id="releaseNotes" placeholder="例如：灰度 10% 用户，重点观察 Fallback 和人工评分。"></textarea>
+                </label>
+              </div>
+              <div class="actions">
+                <button class="primary" id="publishModuleButton">发布 / 推进状态</button>
+                <button class="danger" id="rollbackModuleButton">回滚模块</button>
+              </div>
+            </section>
+            <section class="section">
+              <h3>当前模块</h3>
+              <div id="releaseModuleSummary" class="trace-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel detail">
+          <div class="panel-head">
+            <div>
+              <p>Versions</p>
+              <h2>版本记录</h2>
+            </div>
+          </div>
+          <div class="detail-body">
+            <div id="releaseVersionList" class="trace-list"></div>
           </div>
         </section>
       </section>

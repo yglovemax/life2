@@ -8,6 +8,9 @@ let selectedModuleId = null;
 let currentDetail = null;
 let draftFields = [];
 let latestTestResults = [];
+let costSummaryData = null;
+let fallbackAlerts = [];
+let releaseVersions = [];
 
 const promptLabels = {
   shared_prefix: "共享静态前缀",
@@ -38,6 +41,19 @@ function statusLabel(status) {
     disabled: "已停用",
   };
   return labels[status] || status;
+}
+
+function formatCents(cents) {
+  return `$${(Number(cents || 0) / 100).toFixed(2)}`;
+}
+
+function formatDateTime(value) {
+  if (!value) return "";
+  try {
+    return new Date(value).toLocaleString("zh-CN", { hour12: false });
+  } catch {
+    return value;
+  }
 }
 
 function escapeHtml(value) {
@@ -377,7 +393,12 @@ function removeField(index) {
 
 function traceCard(trace) {
   return `<article class="trace-card">
-    <span>#${trace.id} · ${trace.status} · ${escapeHtml(trace.model_name)}</span>
+    <span>#${trace.id} · ${trace.status} · ${escapeHtml(trace.model_name)} · ${formatCents(trace.estimated_cost_cents)}</span>
+    ${
+      trace.fallback_triggered
+        ? `<p class="warning-line">Fallback：${escapeHtml(trace.fallback_reason || "未记录原因")}</p>`
+        : ""
+    }
     <pre>${escapeHtml(JSON.stringify(trace.final_json, null, 2))}</pre>
     <div class="score-row">
       <input id="score_${trace.id}" type="number" min="1" max="5" value="${trace.manual_score || ""}" placeholder="1-5 分" />
@@ -425,8 +446,12 @@ function showView(view) {
   document.querySelector("#moduleView").classList.toggle("hidden", view !== "modules");
   document.querySelector("#testCenterView").classList.toggle("hidden", view !== "test-center");
   document.querySelector("#knowledgeView").classList.toggle("hidden", view !== "knowledge");
+  document.querySelector("#costCenterView").classList.toggle("hidden", view !== "cost-center");
+  document.querySelector("#releaseCenterView").classList.toggle("hidden", view !== "release-center");
   if (view === "test-center") renderTestCenter();
   if (view === "knowledge") renderKnowledgeWorkspace();
+  if (view === "cost-center") renderCostCenter();
+  if (view === "release-center") renderReleaseCenter();
 }
 
 function renderTestCenter() {
@@ -675,9 +700,184 @@ function knowledgeChunkCard(chunk) {
   </article>`;
 }
 
+function setupCostActions() {
+  document.querySelector("#refreshCostsButton").onclick = renderCostCenter;
+}
+
+async function renderCostCenter() {
+  const notice = document.querySelector("#costNotice");
+  try {
+    const [costData, alertData] = await Promise.all([getJson("/api/costs/summary"), getJson("/api/fallback-alerts")]);
+    costSummaryData = costData;
+    fallbackAlerts = alertData.items;
+    renderCostSummary();
+    notice.innerHTML = `<div class="notice">成本与 Fallback 已刷新</div>`;
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderCostSummary() {
+  if (!costSummaryData) return;
+  const cards = [
+    ["总调用", costSummaryData.total_calls],
+    ["总成本", formatCents(costSummaryData.total_cost_cents)],
+    ["Fallback", costSummaryData.fallback_calls],
+    ["平均成本", formatCents(costSummaryData.total_calls ? costSummaryData.total_cost_cents / costSummaryData.total_calls : 0)],
+  ];
+  document.querySelector("#costSummaryCards").innerHTML = cards
+    .map(([label, value]) => `<article class="mini-card"><span>${label}</span><strong>${value}</strong></article>`)
+    .join("");
+  document.querySelector("#costByPage").innerHTML = costSummaryData.by_page.length
+    ? costSummaryData.by_page.map((item) => costRow(item.page_name, item.calls, item.cost_cents, item.fallback_count)).join("")
+    : '<p class="empty">还没有调用成本。</p>';
+  document.querySelector("#costByModel").innerHTML = costSummaryData.by_model.length
+    ? costSummaryData.by_model.map((item) => costRow(item.model_name, item.calls, item.cost_cents, item.fallback_count)).join("")
+    : '<p class="empty">还没有模型成本。</p>';
+  document.querySelector("#costByModule").innerHTML = costSummaryData.by_module.length
+    ? costSummaryData.by_module.slice(0, 12).map((item) => costRow(item.module_name, item.calls, item.cost_cents, item.fallback_count, item.page_name)).join("")
+    : '<p class="empty">还没有模块成本。</p>';
+  document.querySelector("#fallbackAlerts").innerHTML = fallbackAlerts.length
+    ? fallbackAlerts.map(fallbackAlertCard).join("")
+    : '<p class="empty">暂无 Fallback 告警。</p>';
+}
+
+function costRow(title, calls, costCents, fallbackCount, subtitle = "") {
+  return `<article class="stat-row">
+    <div>
+      <strong>${escapeHtml(title)}</strong>
+      ${subtitle ? `<small>${escapeHtml(subtitle)}</small>` : ""}
+    </div>
+    <div class="stat-values">
+      <span>${calls} 次</span>
+      <span>${formatCents(costCents)}</span>
+      <span>${fallbackCount} Fallback</span>
+    </div>
+  </article>`;
+}
+
+function fallbackAlertCard(alert) {
+  return `<article class="trace-card alert-card">
+    <span>#${alert.trace_id} · ${escapeHtml(alert.page_name)} · ${formatDateTime(alert.created_at)}</span>
+    <p><strong>${escapeHtml(alert.module_name)}</strong></p>
+    <p>原因：${escapeHtml(alert.reason || "未记录原因")}</p>
+    <pre>${escapeHtml(JSON.stringify(alert.final_json, null, 2))}</pre>
+  </article>`;
+}
+
+function setupReleaseActions() {
+  document.querySelector("#refreshReleaseButton").onclick = renderReleaseCenter;
+  document.querySelector("#publishModuleButton").onclick = publishSelectedModule;
+  document.querySelector("#rollbackModuleButton").onclick = rollbackSelectedModule;
+}
+
+async function renderReleaseCenter() {
+  renderReleaseControls();
+  await loadModuleVersions();
+}
+
+function renderReleaseControls() {
+  const moduleSelect = document.querySelector("#releaseModule");
+  const selected = moduleSelect.value || String(selectedModuleId || modules[0]?.id || "");
+  moduleSelect.innerHTML = modules
+    .map((module) => `<option value="${module.id}">${escapeHtml(module.page_name)} / ${escapeHtml(module.name)} · ${statusLabel(module.status)}</option>`)
+    .join("");
+  moduleSelect.value = selected && modules.some((module) => String(module.id) === String(selected)) ? selected : String(modules[0]?.id || "");
+  moduleSelect.onchange = loadModuleVersions;
+
+  document.querySelector("#releaseStatus").innerHTML = ["pending_test", "test_passed", "pending_approval", "gray", "live", "disabled"]
+    .map((status) => `<option value="${status}">${statusLabel(status)}</option>`)
+    .join("");
+}
+
+async function loadModuleVersions() {
+  const moduleId = Number(document.querySelector("#releaseModule").value);
+  const summary = document.querySelector("#releaseModuleSummary");
+  const versionList = document.querySelector("#releaseVersionList");
+  const module = modules.find((item) => item.id === moduleId);
+  if (!module) {
+    summary.innerHTML = '<p class="empty">还没有模块。</p>';
+    versionList.innerHTML = '<p class="empty">还没有版本记录。</p>';
+    return;
+  }
+  summary.innerHTML = releaseModuleCard(module);
+  const data = await getJson(`/api/modules/${moduleId}/versions`);
+  releaseVersions = data.items;
+  versionList.innerHTML = releaseVersions.length ? releaseVersions.map(versionCard).join("") : '<p class="empty">还没有发布版本。</p>';
+}
+
+function releaseModuleCard(module) {
+  return `<article class="trace-card">
+    <span>${escapeHtml(module.page_name)} · v${module.version} · ${statusLabel(module.status)}</span>
+    <p><strong>${escapeHtml(module.name)}</strong></p>
+    <p>负责人：${escapeHtml(module.owner)} · 模型：${escapeHtml(module.model)}</p>
+    <p>调用：${module.today_calls} · Fallback：${module.fallback_count} · 成本：${formatCents(module.today_cost_cents)}</p>
+  </article>`;
+}
+
+function versionCard(version) {
+  const snapshot = version.snapshot || {};
+  return `<article class="trace-card version-card">
+    <span>v${version.version} · ${statusLabel(version.status)} · ${formatDateTime(version.created_at)}</span>
+    <p><strong>${escapeHtml(snapshot.action === "rollback" ? "回滚快照" : "发布快照")}</strong></p>
+    <p>操作人：${escapeHtml(snapshot.operator || "admin")}</p>
+    ${snapshot.notes ? `<p>备注：${escapeHtml(snapshot.notes)}</p>` : ""}
+    ${snapshot.reason ? `<p>原因：${escapeHtml(snapshot.reason)}</p>` : ""}
+  </article>`;
+}
+
+async function publishSelectedModule() {
+  const notice = document.querySelector("#releaseNotice");
+  try {
+    const moduleId = Number(document.querySelector("#releaseModule").value);
+    const saved = await getJson(`/api/modules/${moduleId}/publish`, {
+      method: "POST",
+      body: JSON.stringify({
+        status: document.querySelector("#releaseStatus").value,
+        operator: document.querySelector("#releaseOperator").value.trim() || "admin",
+        notes: document.querySelector("#releaseNotes").value,
+      }),
+    });
+    notice.innerHTML = `<div class="notice">${escapeHtml(saved.name)} 已推进到 ${statusLabel(saved.status)}，版本 v${saved.version}</div>`;
+    await loadMetrics();
+    await loadModules();
+    document.querySelector("#releaseModule").value = String(saved.id);
+    renderReleaseControls();
+    document.querySelector("#releaseModule").value = String(saved.id);
+    await loadModuleVersions();
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function rollbackSelectedModule() {
+  const notice = document.querySelector("#releaseNotice");
+  try {
+    const moduleId = Number(document.querySelector("#releaseModule").value);
+    const saved = await getJson(`/api/modules/${moduleId}/rollback`, {
+      method: "POST",
+      body: JSON.stringify({
+        operator: document.querySelector("#releaseOperator").value.trim() || "admin",
+        reason: document.querySelector("#releaseNotes").value || "后台人工回滚",
+      }),
+    });
+    notice.innerHTML = `<div class="notice">${escapeHtml(saved.name)} 已回滚，版本 v${saved.version}</div>`;
+    await loadMetrics();
+    await loadModules();
+    document.querySelector("#releaseModule").value = String(saved.id);
+    renderReleaseControls();
+    document.querySelector("#releaseModule").value = String(saved.id);
+    await loadModuleVersions();
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
 async function boot() {
   setupNavigation();
   setupKnowledgeActions();
+  setupCostActions();
+  setupReleaseActions();
   document.querySelector("#createModuleButton").onclick = newModuleDraft;
   await loadMetadata();
   await loadMetrics();

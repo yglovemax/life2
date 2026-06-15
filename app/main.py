@@ -8,18 +8,23 @@ from sqlalchemy.orm import Session
 from app.db import get_session, init_db
 from app.seed import ensure_seed_data
 from app.services import (
+    cost_summary,
     create_knowledge_source,
     create_manual_knowledge_entry,
     create_module,
     get_module_detail,
+    list_fallback_alerts,
     list_knowledge_chunks,
     list_knowledge_sources,
     list_call_traces,
     list_models,
+    list_module_versions,
     list_modules,
     list_pages,
     list_test_users,
     metrics,
+    publish_module,
+    rollback_module,
     run_batch_tests,
     run_module_test,
     score_call_trace,
@@ -131,6 +136,30 @@ def module_update(module_id: int, payload: dict, session: Session = Depends(get_
     return detail
 
 
+@app.get("/api/modules/{module_id}/versions")
+def module_versions(module_id: int, session: Session = Depends(get_session)) -> dict:
+    versions = list_module_versions(session, module_id)
+    if versions is None:
+        raise HTTPException(status_code=404, detail="module not found")
+    return {"items": versions}
+
+
+@app.post("/api/modules/{module_id}/publish")
+def module_publish(module_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
+    detail = publish_module(session, module_id, payload)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="module not found")
+    return detail
+
+
+@app.post("/api/modules/{module_id}/rollback")
+def module_rollback(module_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
+    detail = rollback_module(session, module_id, payload)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="module not found")
+    return detail
+
+
 @app.post("/api/modules/{module_id}/test-run")
 def module_test_run(module_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
     trace = run_module_test(session, module_id, payload)
@@ -155,6 +184,16 @@ def call_trace_score(trace_id: int, payload: dict, session: Session = Depends(ge
     if trace is None:
         raise HTTPException(status_code=404, detail="call trace not found")
     return trace
+
+
+@app.get("/api/costs/summary")
+def costs_summary(session: Session = Depends(get_session)) -> dict:
+    return cost_summary(session)
+
+
+@app.get("/api/fallback-alerts")
+def fallback_alerts(session: Session = Depends(get_session)) -> dict:
+    return {"items": list_fallback_alerts(session)}
 
 
 @app.get("/api/metrics")

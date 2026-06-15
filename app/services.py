@@ -1,7 +1,18 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.models import CallTrace, FieldContract, KnowledgeChunk, KnowledgeSource, ModelConfig, Module, Page, PromptTemplate
+from app.models import (
+    CallTrace,
+    FieldContract,
+    KnowledgeChunk,
+    KnowledgeSource,
+    ModelConfig,
+    Module,
+    ModuleStatus,
+    ModuleVersion,
+    Page,
+    PromptTemplate,
+)
 
 
 PROMPT_KEYS = [
@@ -292,6 +303,8 @@ def get_module_detail(session: Session, module_id: int) -> dict | None:
     calls = sorted(module.calls, key=lambda call: call.created_at, reverse=True)[:10]
     return {
         "id": module.id,
+        "page_id": module.page_id,
+        "model_id": module.model_id,
         "slug": module.slug,
         "name": module.name,
         "page_name": module.page.name,
@@ -312,6 +325,7 @@ def get_module_detail(session: Session, module_id: int) -> dict | None:
         },
         "fields": [serialize_field(field) for field in module.fields],
         "recent_calls": [serialize_call(call) for call in calls],
+        "versions": [serialize_version(version) for version in sorted(module.versions, key=lambda item: (item.created_at, item.id), reverse=True)],
         "issues": [
             {
                 "id": issue.id,
@@ -323,6 +337,17 @@ def get_module_detail(session: Session, module_id: int) -> dict | None:
             }
             for issue in module.issues
         ],
+    }
+
+
+def serialize_version(version: ModuleVersion) -> dict:
+    return {
+        "id": version.id,
+        "module_id": version.module_id,
+        "version": version.version,
+        "status": version.status,
+        "snapshot": version.snapshot,
+        "created_at": version.created_at.isoformat(),
     }
 
 
@@ -474,19 +499,40 @@ def run_module_test(session: Session, module_id: int, payload: dict) -> dict | N
             prompt.final_request_template,
         ]
     )
-    summary = f"{module.name}测试输出：已根据 {payload.get('test_user', '测试用户')} 和 {payload.get('date', '未指定日期')} 生成内容。"
-    final_json = {
-        "module_id": module.id,
-        "module_slug": module.slug,
-        "title": module.name,
-        "summary": summary,
-        "fields": {field.field_name: field.example for field in module.fields},
-        "knowledge_hits": knowledge_hits,
-    }
-    raw_response = {
-        "title": module.name,
-        "summary": summary,
-    }
+    force_fallback = bool(payload.get("force_fallback"))
+    fallback_reason = payload.get("fallback_reason") or "forced_fallback"
+    if force_fallback:
+        summary = module.fallback_content or f"{module.name}暂时使用备用内容，请稍后重试。"
+        final_json = {
+            "module_id": module.id,
+            "module_slug": module.slug,
+            "title": module.name,
+            "summary": summary,
+            "fallback": True,
+            "fallback_reason": fallback_reason,
+            "knowledge_hits": knowledge_hits,
+        }
+        raw_response = {
+            "fallback": True,
+            "reason": fallback_reason,
+            "summary": summary,
+        }
+        status = "fallback"
+    else:
+        summary = f"{module.name}测试输出：已根据 {payload.get('test_user', '测试用户')} 和 {payload.get('date', '未指定日期')} 生成内容。"
+        final_json = {
+            "module_id": module.id,
+            "module_slug": module.slug,
+            "title": module.name,
+            "summary": summary,
+            "fields": {field.field_name: field.example for field in module.fields},
+            "knowledge_hits": knowledge_hits,
+        }
+        raw_response = {
+            "title": module.name,
+            "summary": summary,
+        }
+        status = "ok"
     input_tokens = max(1, len(model_request) // 4)
     output_tokens = max(1, len(str(raw_response)) // 4)
     trace = CallTrace(
@@ -496,8 +542,9 @@ def run_module_test(session: Session, module_id: int, payload: dict) -> dict | N
         model_request=model_request,
         model_raw_response=str(raw_response),
         final_json=final_json,
-        status="ok",
-        fallback_triggered=False,
+        status=status,
+        fallback_triggered=force_fallback,
+        fallback_reason=fallback_reason if force_fallback else "",
         prompt_version=prompt.version,
         model_name=model_name,
         input_tokens=input_tokens,
@@ -535,6 +582,173 @@ def score_call_trace(session: Session, trace_id: int, payload: dict) -> dict | N
 def list_call_traces(session: Session, limit: int = 20) -> list[dict]:
     traces = session.scalars(select(CallTrace).order_by(CallTrace.created_at.desc()).limit(limit)).all()
     return [serialize_call(trace) for trace in traces]
+
+
+def cost_summary(session: Session) -> dict:
+    traces = session.scalars(
+        select(CallTrace)
+        .options(joinedload(CallTrace.module).joinedload(Module.page))
+        .order_by(CallTrace.created_at.desc())
+    ).all()
+    by_page: dict[str, dict] = {}
+    by_module: dict[int, dict] = {}
+    by_model: dict[str, dict] = {}
+
+    for trace in traces:
+        cost = trace.estimated_cost_cents or 0
+        module = trace.module
+        page_name = module.page.name if module and module.page else "未分组页面"
+        module_id = module.id if module else trace.module_id
+        module_name = module.name if module else f"模块 {trace.module_id}"
+        model_name = trace.model_name or "未配置"
+
+        page_row = by_page.setdefault(page_name, {"page_name": page_name, "calls": 0, "cost_cents": 0, "fallback_count": 0})
+        page_row["calls"] += 1
+        page_row["cost_cents"] += cost
+        page_row["fallback_count"] += int(trace.fallback_triggered)
+
+        module_row = by_module.setdefault(
+            module_id,
+            {"module_id": module_id, "module_name": module_name, "page_name": page_name, "calls": 0, "cost_cents": 0, "fallback_count": 0},
+        )
+        module_row["calls"] += 1
+        module_row["cost_cents"] += cost
+        module_row["fallback_count"] += int(trace.fallback_triggered)
+
+        model_row = by_model.setdefault(model_name, {"model_name": model_name, "calls": 0, "cost_cents": 0, "fallback_count": 0})
+        model_row["calls"] += 1
+        model_row["cost_cents"] += cost
+        model_row["fallback_count"] += int(trace.fallback_triggered)
+
+    return {
+        "total_calls": len(traces),
+        "total_cost_cents": sum(trace.estimated_cost_cents or 0 for trace in traces),
+        "fallback_calls": sum(1 for trace in traces if trace.fallback_triggered),
+        "by_page": sorted(by_page.values(), key=lambda item: item["cost_cents"], reverse=True),
+        "by_module": sorted(by_module.values(), key=lambda item: item["cost_cents"], reverse=True),
+        "by_model": sorted(by_model.values(), key=lambda item: item["cost_cents"], reverse=True),
+    }
+
+
+def list_fallback_alerts(session: Session, limit: int = 30) -> list[dict]:
+    traces = session.scalars(
+        select(CallTrace)
+        .where(CallTrace.fallback_triggered.is_(True))
+        .options(joinedload(CallTrace.module).joinedload(Module.page))
+        .order_by(CallTrace.created_at.desc())
+        .limit(limit)
+    ).all()
+    return [
+        {
+            "trace_id": trace.id,
+            "module_id": trace.module_id,
+            "module_name": trace.module.name if trace.module else f"模块 {trace.module_id}",
+            "page_name": trace.module.page.name if trace.module and trace.module.page else "未分组页面",
+            "reason": trace.fallback_reason,
+            "status": trace.status,
+            "model_name": trace.model_name,
+            "created_at": trace.created_at.isoformat(),
+            "final_json": trace.final_json,
+        }
+        for trace in traces
+    ]
+
+
+def list_module_versions(session: Session, module_id: int) -> list[dict] | None:
+    if session.get(Module, module_id) is None:
+        return None
+    versions = session.scalars(
+        select(ModuleVersion)
+        .where(ModuleVersion.module_id == module_id)
+        .order_by(ModuleVersion.created_at.desc(), ModuleVersion.id.desc())
+    ).all()
+    return [serialize_version(version) for version in versions]
+
+
+def publish_module(session: Session, module_id: int, payload: dict) -> dict | None:
+    module = load_module_for_release(session, module_id)
+    if module is None:
+        return None
+
+    next_status = payload.get("status") or ModuleStatus.gray.value
+    allowed_statuses = {
+        ModuleStatus.pending_test.value,
+        ModuleStatus.test_passed.value,
+        ModuleStatus.pending_approval.value,
+        ModuleStatus.gray.value,
+        ModuleStatus.live.value,
+        ModuleStatus.disabled.value,
+    }
+    if next_status not in allowed_statuses:
+        next_status = ModuleStatus.gray.value
+
+    module.version += 1
+    module.status = next_status
+    session.add(
+        ModuleVersion(
+            module_id=module.id,
+            version=module.version,
+            status=module.status,
+            snapshot=module_release_snapshot(module, payload, action="publish"),
+        )
+    )
+    session.commit()
+    return get_module_detail(session, module.id)
+
+
+def rollback_module(session: Session, module_id: int, payload: dict) -> dict | None:
+    module = load_module_for_release(session, module_id)
+    if module is None:
+        return None
+
+    module.version += 1
+    module.status = ModuleStatus.rolled_back.value
+    session.add(
+        ModuleVersion(
+            module_id=module.id,
+            version=module.version,
+            status=module.status,
+            snapshot=module_release_snapshot(module, payload, action="rollback"),
+        )
+    )
+    session.commit()
+    return get_module_detail(session, module.id)
+
+
+def load_module_for_release(session: Session, module_id: int) -> Module | None:
+    return session.scalar(
+        select(Module)
+        .where(Module.id == module_id)
+        .options(joinedload(Module.prompt), selectinload(Module.fields), joinedload(Module.page), joinedload(Module.model), selectinload(Module.versions))
+    )
+
+
+def module_release_snapshot(module: Module, payload: dict, action: str) -> dict:
+    prompt = module.prompt or PromptTemplate(module_id=module.id)
+    return {
+        "action": action,
+        "operator": payload.get("operator") or "admin",
+        "notes": payload.get("notes") or "",
+        "reason": payload.get("reason") or "",
+        "target_version": payload.get("target_version"),
+        "module": {
+            "id": module.id,
+            "slug": module.slug,
+            "name": module.name,
+            "page_id": module.page_id,
+            "page_name": module.page.name if module.page else "",
+            "model_id": module.model_id,
+            "model_name": module.model.display_name if module.model else "",
+            "owner": module.owner,
+            "version": module.version,
+            "status": module.status,
+            "fallback_content": module.fallback_content,
+            "algorithm_fields": module.algorithm_fields,
+            "knowledge_tags": module.knowledge_tags,
+        },
+        "prompt": {key: getattr(prompt, key) for key in PROMPT_KEYS},
+        "fields": [serialize_field(field) for field in module.fields],
+    }
 
 
 def estimate_cost_cents(input_tokens: int, output_tokens: int) -> int:
