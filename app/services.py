@@ -1,12 +1,16 @@
 import hashlib
 import hmac
+import json
 import secrets
+import urllib.error
+import urllib.request
 from datetime import timedelta
 from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from app.core.settings import get_settings
 from app.models import (
     AdminSession,
     AdminSessionStatus,
@@ -503,11 +507,15 @@ def run_module_test(session: Session, module_id: int, payload: dict) -> dict | N
 
 def run_module_trace(session: Session, module: Module, payload: dict, request_type: str, allow_model_override: bool = False) -> dict:
     prompt = module.prompt or PromptTemplate(module_id=module.id)
-    model_name = module.model.display_name if module.model else "未配置"
+    policy = resolve_output_policy(session, nullable_int(payload.get("policy_id")))
+    selected_model = module.model
     if allow_model_override and payload.get("model_id"):
         override_model = session.get(ModelConfig, int(payload["model_id"]))
         if override_model is not None:
-            model_name = override_model.display_name
+            selected_model = override_model
+    elif policy is not None:
+        selected_model = resolve_primary_model(session, policy, payload) or selected_model
+    model_name = selected_model.display_name if selected_model else "未配置"
     input_payload = payload.get("input_payload") or {}
     knowledge_hits = retrieve_knowledge_hits(session, module.knowledge_tags or [], input_payload)
     model_request = "\n\n".join(
@@ -522,52 +530,84 @@ def run_module_trace(session: Session, module: Module, payload: dict, request_ty
     )
     force_fallback = bool(payload.get("force_fallback"))
     fallback_reason = payload.get("fallback_reason") or "forced_fallback"
+    provider_usage: dict = {}
+
     if force_fallback:
-        summary = module.fallback_content or f"{module.name}暂时使用备用内容，请稍后重试。"
-        final_json = {
-            "module_id": module.id,
-            "module_slug": module.slug,
-            "title": module.name,
-            "summary": summary,
-            "fallback": True,
-            "fallback_reason": fallback_reason,
-            "knowledge_hits": knowledge_hits,
-        }
-        raw_response = {
-            "fallback": True,
-            "reason": fallback_reason,
-            "summary": summary,
-        }
+        final_json = build_fallback_json(module, knowledge_hits, fallback_reason)
+        raw_response_text = json.dumps(
+            {
+                "fallback": True,
+                "reason": fallback_reason,
+                "summary": final_json["summary"],
+            },
+            ensure_ascii=False,
+        )
         status = "fallback"
+        fallback_triggered = True
     else:
-        caller = payload.get("test_user") or payload.get("user_id") or "测试用户"
-        output_label = "正式输出" if request_type == "official" else "测试输出"
-        summary = f"{module.name}{output_label}：已根据 {caller} 和 {payload.get('date', '未指定日期')} 生成内容。"
-        final_json = {
-            "module_id": module.id,
-            "module_slug": module.slug,
-            "title": module.name,
-            "summary": summary,
-            "fields": {field.field_name: field.example for field in module.fields},
-            "knowledge_hits": knowledge_hits,
-        }
-        raw_response = {
-            "title": module.name,
-            "summary": summary,
-        }
-        status = "ok"
-    input_tokens = max(1, len(model_request) // 4)
-    output_tokens = max(1, len(str(raw_response)) // 4)
+        raw_response_text = ""
+        model_output_handled = False
+        if "simulate_model_response" in payload:
+            raw_response_text = coerce_raw_model_response(payload.get("simulate_model_response"))
+        elif should_call_live_model(payload):
+            provider_result = call_model_provider(selected_model, model_request, module, policy)
+            provider_usage = provider_result.get("usage") or {}
+            raw_response_text = provider_result.get("raw_text") or ""
+            if not provider_result.get("ok"):
+                fallback_reason = provider_result.get("fallback_reason") or "model_provider_error"
+                final_json = build_fallback_json(module, knowledge_hits, fallback_reason)
+                final_json["provider_error"] = provider_result.get("error") or ""
+                status = "fallback"
+                fallback_triggered = True
+                model_output_handled = True
+            else:
+                final_json, status, fallback_triggered, fallback_reason = validate_model_output(
+                    module,
+                    raw_response_text,
+                    knowledge_hits,
+                )
+                model_output_handled = True
+        if not raw_response_text and not model_output_handled:
+            caller = payload.get("test_user") or payload.get("user_id") or "测试用户"
+            output_label = "正式输出" if request_type == "official" else "测试输出"
+            summary = f"{module.name}{output_label}：已根据 {caller} 和 {payload.get('date', '未指定日期')} 生成内容。"
+            final_json = {
+                "module_id": module.id,
+                "module_slug": module.slug,
+                "title": module.name,
+                "summary": summary,
+                "fields": {field.field_name: field.example for field in module.fields},
+                "knowledge_hits": knowledge_hits,
+            }
+            raw_response_text = json.dumps(
+                {
+                    "title": module.name,
+                    "summary": summary,
+                },
+                ensure_ascii=False,
+            )
+            status = "ok"
+            fallback_triggered = False
+            fallback_reason = ""
+        elif not model_output_handled:
+            final_json, status, fallback_triggered, fallback_reason = validate_model_output(
+                module,
+                raw_response_text,
+                knowledge_hits,
+            )
+
+    input_tokens = int(provider_usage.get("input_tokens") or max(1, len(model_request) // 4))
+    output_tokens = int(provider_usage.get("output_tokens") or max(1, len(raw_response_text) // 4))
     trace = CallTrace(
         module_id=module.id,
         request_type=request_type,
         input_payload=payload,
         model_request=model_request,
-        model_raw_response=str(raw_response),
+        model_raw_response=raw_response_text,
         final_json=final_json,
         status=status,
-        fallback_triggered=force_fallback,
-        fallback_reason=fallback_reason if force_fallback else "",
+        fallback_triggered=fallback_triggered,
+        fallback_reason=fallback_reason if fallback_triggered else "",
         prompt_version=prompt.version,
         model_name=model_name,
         input_tokens=input_tokens,
@@ -579,6 +619,187 @@ def run_module_trace(session: Session, module: Module, payload: dict, request_ty
     session.commit()
     session.refresh(trace)
     return serialize_call(trace)
+
+
+def coerce_raw_model_response(value) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
+def should_call_live_model(payload: dict) -> bool:
+    settings = get_settings()
+    return bool(payload.get("use_live_model")) or settings.model_call_mode.lower() == "live"
+
+
+def validate_model_output(module: Module, raw_response_text: str, knowledge_hits: list[dict]) -> tuple[dict, str, bool, str]:
+    parsed, parse_error = parse_model_json(raw_response_text)
+    if parse_error:
+        return build_fallback_json(module, knowledge_hits, "invalid_json"), "fallback", True, "invalid_json"
+
+    missing_fields = required_output_fields_missing(module, parsed)
+    if missing_fields:
+        fallback_json = build_fallback_json(module, knowledge_hits, "missing_required_fields")
+        fallback_json["missing_fields"] = missing_fields
+        return fallback_json, "fallback", True, "missing_required_fields"
+
+    final_json = dict(parsed)
+    final_json["module_id"] = module.id
+    final_json["module_slug"] = module.slug
+    final_json.setdefault("title", module.name)
+    final_json.setdefault("knowledge_hits", knowledge_hits)
+    return final_json, "ok", False, ""
+
+
+def parse_model_json(raw_response_text: str) -> tuple[dict, str]:
+    text = strip_json_fence(raw_response_text)
+    if not text:
+        return {}, "empty_response"
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return {}, "invalid_json"
+    if not isinstance(parsed, dict):
+        return {}, "invalid_json"
+    return parsed, ""
+
+
+def strip_json_fence(raw_response_text: str) -> str:
+    text = (raw_response_text or "").strip()
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    if lines and lines[0].strip().lower() == "json":
+        lines = lines[1:]
+    return "\n".join(lines).strip()
+
+
+def required_output_fields_missing(module: Module, parsed: dict) -> list[str]:
+    missing = []
+    for field in module.fields:
+        if not field.is_required or not field.is_ai_generated:
+            continue
+        value = parsed.get(field.field_name)
+        if value is None or value == "" or value == [] or value == {}:
+            missing.append(field.field_name)
+    return missing
+
+
+def build_fallback_json(module: Module, knowledge_hits: list[dict], reason: str) -> dict:
+    summary = module.fallback_content or f"{module.name}暂时使用备用内容，请稍后重试。"
+    return {
+        "module_id": module.id,
+        "module_slug": module.slug,
+        "title": module.name,
+        "summary": summary,
+        "fallback": True,
+        "fallback_reason": reason,
+        "knowledge_hits": knowledge_hits,
+    }
+
+
+def call_model_provider(model: ModelConfig | None, model_request: str, module: Module, policy: OutputPolicy | None) -> dict:
+    provider = (model.provider if model else "openai").lower()
+    if provider != "openai":
+        return {
+            "ok": False,
+            "fallback_reason": "unsupported_model_provider",
+            "error": f"unsupported provider: {provider}",
+            "raw_text": "",
+        }
+    return call_openai_responses_api(model, model_request, module, policy)
+
+
+def call_openai_responses_api(model: ModelConfig | None, model_request: str, module: Module, policy: OutputPolicy | None) -> dict:
+    settings = get_settings()
+    if not settings.openai_api_key:
+        return {
+            "ok": False,
+            "fallback_reason": "provider_key_missing",
+            "error": "NEXA_OPENAI_API_KEY is not configured",
+            "raw_text": "",
+        }
+
+    endpoint = settings.openai_base_url.rstrip("/") + "/responses"
+    request_body = {
+        "model": model.name if model else "gpt-5.4-mini",
+        "input": [{"role": "user", "content": model_request}],
+        "store": False,
+        "max_output_tokens": policy.max_output_tokens if policy else 600,
+    }
+    temperature = (policy.temperature_x100 if policy else 70) / 100
+    if temperature >= 0:
+        request_body["temperature"] = temperature
+    if (policy.response_format if policy else "json") == "json":
+        request_body["text"] = {"format": output_json_schema(module)}
+
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {settings.openai_api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=settings.model_request_timeout_seconds) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        return {"ok": False, "fallback_reason": "model_provider_error", "error": detail, "raw_text": detail}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+        return {"ok": False, "fallback_reason": "model_provider_error", "error": str(error), "raw_text": str(error)}
+
+    raw_text = extract_openai_output_text(payload)
+    usage = payload.get("usage") or {}
+    return {
+        "ok": bool(raw_text),
+        "fallback_reason": "" if raw_text else "empty_model_response",
+        "error": "" if raw_text else "OpenAI response did not include output text",
+        "raw_text": raw_text,
+        "usage": {
+            "input_tokens": usage.get("input_tokens") or usage.get("prompt_tokens") or 0,
+            "output_tokens": usage.get("output_tokens") or usage.get("completion_tokens") or 0,
+        },
+    }
+
+
+def output_json_schema(module: Module) -> dict:
+    properties = {
+        field.field_name: {
+            "type": "string",
+            "description": field.purpose or field.display_position or field.field_name,
+        }
+        for field in module.fields
+    }
+    required = [field.field_name for field in module.fields if field.is_required and field.is_ai_generated]
+    return {
+        "type": "json_schema",
+        "name": f"nexa_{module.slug.replace('-', '_')[:40]}",
+        "strict": False,
+        "schema": {
+            "type": "object",
+            "properties": properties or {"summary": {"type": "string"}},
+            "required": required or ["summary"],
+            "additionalProperties": True,
+        },
+    }
+
+
+def extract_openai_output_text(payload: dict) -> str:
+    if payload.get("output_text"):
+        return str(payload["output_text"]).strip()
+    text_parts = []
+    for item in payload.get("output") or []:
+        for content in item.get("content") or []:
+            if content.get("type") in {"output_text", "text"} and content.get("text"):
+                text_parts.append(str(content["text"]))
+    return "\n".join(text_parts).strip()
 
 
 def run_batch_tests(session: Session, payload: dict) -> list[dict]:

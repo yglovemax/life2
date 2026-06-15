@@ -132,4 +132,20 @@
 说明：
 
 - 当前阶段完成配置、脱敏、路由预览和编排规则。
-- 尚未向外部大模型供应商发起真实请求。
+- 模型供应商 Key 在后台只保存哈希和前缀，不保存可逆明文。
+
+## Step 11: 模型适配层与输出校验
+
+状态：已完成第一版。
+
+交付：
+
+- OpenAI Responses API 适配层。
+- `NEXA_MODEL_CALL_MODE=mock/live` 运行模式。
+- `NEXA_OPENAI_API_KEY` 运行时密钥读取。
+- 模型原始返回保存到 `CallTrace.model_raw_response`。
+- 合法 JSON 解析和最终 JSON 组装。
+- AI 生成必填字段缺失校验。
+- `invalid_json`、`missing_required_fields`、`provider_key_missing`、`model_provider_error` 等 Fallback 原因。
+- 测试中心支持粘贴模拟模型原始返回。
+- 调用记录支持展开查看原始响应和模型请求。

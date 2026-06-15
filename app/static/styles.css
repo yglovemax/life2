@@ -497,6 +497,35 @@ label {
   gap: 10px;
 }
 
+.trace-details {
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.trace-details summary {
+  cursor: pointer;
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.trace-details small {
+  display: block;
+  margin-top: 10px;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.trace-details pre {
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+}
+
 .score-row {
   display: grid;
   grid-template-columns: 90px 1fr auto;

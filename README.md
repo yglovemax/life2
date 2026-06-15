@@ -13,6 +13,8 @@ Phase 1 已完成第一版闭环：
 - 字段契约配置
 - 模型配置
 - 模型供应商 Key 管理、模型路由和输出策略
+- 真实模型调用适配层（默认 mock，可通过环境变量开启 OpenAI Responses API）
+- 模型原始返回 JSON 校验、缺字段自动 Fallback
 - 测试中心和人工评分
 - 问题追踪和责任流转
 - 知识库录入与轻量检索
@@ -38,6 +40,21 @@ uvicorn app.main:app --reload --port 8812
 - API 文档：http://127.0.0.1:8812/docs
 
 本地默认后台账号为 `admin / admin123`。生产部署前请覆盖 `NEXA_ADMIN_USERNAME` 和 `NEXA_ADMIN_PASSWORD`。
+
+模型调用默认不出网，方便本地开发和测试：
+
+```bash
+NEXA_MODEL_CALL_MODE=mock
+```
+
+生产需要真实调用 OpenAI 时设置：
+
+```bash
+export NEXA_MODEL_CALL_MODE=live
+export NEXA_OPENAI_API_KEY="<openai_api_key>"
+```
+
+后台保存的模型供应商 Key 只做配置、脱敏展示和审计占位；实际运行时 Key 读取 `NEXA_OPENAI_API_KEY`，避免数据库保存可逆明文密钥。
 
 App 对接说明见：`docs/app-api.md`
 安全审计说明见：`docs/security.md`

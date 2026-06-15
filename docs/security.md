@@ -57,7 +57,18 @@ admin / admin123
 - 状态
 - 创建时间、最近使用时间、撤销时间
 
-当前阶段模型 Key 只用于配置和路由预览，还不会向外部大模型供应商发起真实请求。
+当前后台保存的模型 Key 只用于配置、脱敏展示、路由预览和审计占位，数据库不会保存可逆明文。
+
+真实模型调用使用运行时环境变量：
+
+```bash
+NEXA_MODEL_CALL_MODE=live
+NEXA_OPENAI_API_KEY=<openai_api_key>
+NEXA_OPENAI_BASE_URL=https://api.openai.com/v1
+NEXA_MODEL_REQUEST_TIMEOUT_SECONDS=45
+```
+
+如果 `NEXA_MODEL_CALL_MODE=live` 但没有配置 `NEXA_OPENAI_API_KEY`，调用会进入 Fallback，并记录 `provider_key_missing`。如果模型返回不是合法 JSON，会记录 `invalid_json`；如果缺少 AI 生成的必填字段，会记录 `missing_required_fields`。
 
 ## 默认开发 Token
 

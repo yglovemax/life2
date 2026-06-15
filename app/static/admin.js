@@ -513,6 +513,13 @@ function traceCard(trace) {
         : ""
     }
     <pre>${escapeHtml(JSON.stringify(trace.final_json, null, 2))}</pre>
+    <details class="trace-details">
+      <summary>原始响应 / 模型请求</summary>
+      <small>Model Raw Response</small>
+      <pre>${escapeHtml(trace.model_raw_response || "")}</pre>
+      <small>Model Request</small>
+      <pre>${escapeHtml(trace.model_request || "")}</pre>
+    </details>
     <div class="score-row">
       <input id="score_${trace.id}" type="number" min="1" max="5" value="${trace.manual_score || ""}" placeholder="1-5 分" />
       <input id="notes_${trace.id}" value="${escapeHtml(trace.reviewer_notes || "")}" placeholder="人工评分备注" />
@@ -636,12 +643,17 @@ function selectedTestModuleIds() {
 }
 
 function testPayloadBase() {
-  return {
+  const payload = {
     test_user: document.querySelector("#testUser").value,
     date: document.querySelector("#testDate").value,
     model_id: Number(document.querySelector("#testModel").value),
     input_payload: parseJsonInput("#testPayload", {}),
   };
+  const mockModelResponse = document.querySelector("#testMockModelResponse").value.trim();
+  if (mockModelResponse) {
+    payload.simulate_model_response = mockModelResponse;
+  }
+  return payload;
 }
 
 async function runTestCenter(mode) {

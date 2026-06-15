@@ -4,7 +4,7 @@
 
 本项目按需求原文实现 Nexa 占卜 APP 的 AI API 管理后台。后台不是训练大模型权重，而是管理 AI 内容生产链路：
 
-`页面 -> 模块 -> Prompt -> 算法数据 -> 知识库 -> 模型路由 -> 输出编排 -> JSON 字段契约 -> 测试追踪 -> 问题追踪 -> 发布回滚`
+`页面 -> 模块 -> Prompt -> 算法数据 -> 知识库 -> 模型路由 -> 输出编排 -> 模型供应商适配 -> JSON 字段契约校验 -> Fallback -> 测试追踪 -> 问题追踪 -> 发布回滚`
 
 ## 一期边界
 
@@ -23,7 +23,7 @@ app/
   db.py                数据库连接和初始化
   models.py            核心数据库模型
   seed.py              一期页面和模块预置数据
-  services.py          模块中心、详情、测试追踪、指标服务
+  services.py          模块中心、模型路由、输出校验、测试追踪、指标服务
   static/              第一版后台前端
 docs/
   requirements/        原版需求文档归档
@@ -40,7 +40,7 @@ tests/
 - `ModelConfig`：模型供应商、模型名、质量层级和成本配置。
 - `ModelProviderKey`：模型供应商 Key 的哈希和前缀，不保存明文。
 - `OutputPolicy`：模型路由、备用模型、输出 token、温度、返回格式和安全边界。
-- `CallTrace`：一次测试或正式调用的输入、模型请求、原始返回、最终 JSON 和成本。
+- `CallTrace`：一次测试或正式调用的输入、模型请求、模型原始返回、最终 JSON、Fallback 原因和成本。
 - `ModuleVersion`：模块版本快照。
 - `Issue`：问题类型、负责人和处理状态。
 
@@ -52,14 +52,38 @@ tests/
 4. 模块详情展示 Prompt 五段式、字段契约、最近调用记录和当前问题。
 5. 模型路由根据输出策略选择主模型和备用模型。
 6. 输出编排器提供最大输出 token、温度、返回格式和安全边界。
-7. 单模块测试接口生成一次模拟模型调用，保存 `CallTrace`。
-8. 发现内容、字段、Fallback、模型或算法数据问题后，绑定到模块生成 `Issue`。
-9. 问题可以分配负责人，并从 `open` 推进到 `in_progress` 或 `resolved`。
-10. 前端刷新详情区，展示最终 JSON、问题状态和未解决问题数。
+7. 默认 mock 模式生成模拟模型返回；live 模式通过 OpenAI Responses API 适配层请求真实模型。
+8. 输出校验器解析模型原始返回，要求合法 JSON，并检查 AI 生成的必填字段。
+9. 如果模型返回不是合法 JSON、缺少必填字段、供应商不可用或未配置运行时 Key，调用自动进入 Fallback。
+10. 单模块测试接口保存 `CallTrace`，包含模型请求、原始返回、最终 JSON、Fallback 原因和成本估算。
+11. 发现内容、字段、Fallback、模型或算法数据问题后，绑定到模块生成 `Issue`。
+12. 问题可以分配负责人，并从 `open` 推进到 `in_progress` 或 `resolved`。
+13. 前端刷新详情区，展示最终 JSON、原始响应、问题状态和未解决问题数。
+
+## 模型调用模式
+
+默认模式是 `mock`，本地测试不会向外部模型供应商发起请求。
+
+```bash
+NEXA_MODEL_CALL_MODE=mock
+```
+
+生产开启真实模型调用：
+
+```bash
+NEXA_MODEL_CALL_MODE=live
+NEXA_OPENAI_API_KEY=<openai_api_key>
+```
+
+实现使用 OpenAI Responses API。OpenAI 官方文档建议 GPT-5 系列推理模型优先使用 Responses API，并在 Responses 中通过 Structured Outputs 约束 JSON 结构：
+
+- Responses API：https://developers.openai.com/api/reference/resources/responses/methods/create/
+- Structured Outputs：https://developers.openai.com/api/docs/guides/structured-outputs
+
+当前代码保留平台侧二次校验，即使供应商返回异常，也会进入可追踪 Fallback。
 
 ## 后续演进
 
-- 接入真实模型调用 provider adapter。
 - 增加更完整的发布审批。
 - 增加问题操作审计和评论历史。
 - 从 SQLite 平滑切换到 Postgres。

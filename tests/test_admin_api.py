@@ -106,6 +106,77 @@ def test_test_run_creates_call_trace_with_final_json():
     assert detail["recent_calls"][0]["id"] == data["id"]
 
 
+def test_test_run_accepts_valid_model_json_and_records_raw_response():
+    module_id = client.get("/api/modules").json()["items"][0]["id"]
+    simulated_response = '{"title":"今日提醒","summary":"适合把计划拆小，并保留弹性。"}'
+
+    response = client.post(
+        f"/api/modules/{module_id}/test-run",
+        json={
+            "test_user": "demo_user_001",
+            "date": "2026-06-15",
+            "simulate_model_response": simulated_response,
+            "input_payload": {"sun_sign": "白羊座", "nickname": "max"},
+        },
+    )
+
+    assert response.status_code == 200
+    trace = response.json()
+    assert trace["status"] == "ok"
+    assert trace["fallback_triggered"] is False
+    assert trace["fallback_reason"] == ""
+    assert trace["model_raw_response"] == simulated_response
+    assert trace["final_json"]["title"] == "今日提醒"
+    assert trace["final_json"]["summary"] == "适合把计划拆小，并保留弹性。"
+    assert trace["final_json"]["module_id"] == module_id
+    assert trace["final_json"]["module_slug"]
+
+
+def test_test_run_invalid_model_json_triggers_fallback_and_keeps_raw_response():
+    module = client.get("/api/modules").json()["items"][0]
+    detail = client.get(f"/api/modules/{module['id']}").json()
+
+    response = client.post(
+        f"/api/modules/{module['id']}/test-run",
+        json={
+            "test_user": "demo_user_001",
+            "date": "2026-06-15",
+            "simulate_model_response": "不是 JSON",
+            "input_payload": {"sun_sign": "白羊座", "nickname": "max"},
+        },
+    )
+
+    assert response.status_code == 200
+    trace = response.json()
+    assert trace["status"] == "fallback"
+    assert trace["fallback_triggered"] is True
+    assert trace["fallback_reason"] == "invalid_json"
+    assert trace["model_raw_response"] == "不是 JSON"
+    assert detail["fallback_content"] in trace["final_json"]["summary"]
+    assert trace["final_json"]["fallback_reason"] == "invalid_json"
+
+
+def test_test_run_missing_required_model_field_triggers_fallback():
+    module = client.get("/api/modules").json()["items"][0]
+
+    response = client.post(
+        f"/api/modules/{module['id']}/test-run",
+        json={
+            "test_user": "demo_user_001",
+            "date": "2026-06-15",
+            "simulate_model_response": '{"title":"缺字段样本"}',
+            "input_payload": {"sun_sign": "白羊座", "nickname": "max"},
+        },
+    )
+
+    assert response.status_code == 200
+    trace = response.json()
+    assert trace["status"] == "fallback"
+    assert trace["fallback_triggered"] is True
+    assert trace["fallback_reason"] == "missing_required_fields"
+    assert trace["final_json"]["missing_fields"] == ["summary"]
+
+
 def test_create_module_saves_prompt_fields_and_fallback_as_draft():
     pages_response = client.get("/api/pages")
     models_response = client.get("/api/models")
