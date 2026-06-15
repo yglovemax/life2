@@ -15,6 +15,13 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.settings import get_settings
 from app.platform.object_storage import LocalObjectStorage, safe_object_key
+from app.training.ai import (
+    TRAINING_OUTPUT_SCHEMA,
+    TRAINING_SYSTEM_PROMPT,
+    build_training_prompt,
+    normalize_training_chunks,
+    parse_training_response,
+)
 from app.training.documents import entries_to_markdown, parse_training_document, safe_upload_filename
 from app.training.github_import import fetch_github_training_files
 from app.models import (
@@ -39,6 +46,8 @@ from app.models import (
     OutputPolicy,
     Page,
     PromptTemplate,
+    TrainingDraftChunk,
+    TrainingRun,
     utc_now,
 )
 
@@ -296,6 +305,294 @@ def merge_tags(*groups: list[str]) -> list[str]:
             seen.add(tag)
             merged.append(tag)
     return merged
+
+
+def create_training_run(session: Session, payload: dict) -> dict:
+    source, entries, source_title, source_tags = resolve_training_entries(session, payload)
+    prompt = build_training_prompt(source_title, entries)
+    run = TrainingRun(
+        source_id=source.id if source else None,
+        title=(payload.get("title") or source_title or "AI 训练运行").strip(),
+        status="running",
+        prompt=prompt,
+        created_by=payload.get("operator") or "admin",
+    )
+    session.add(run)
+    session.flush()
+
+    raw_response_text = ""
+    parsed: dict = {}
+    normalized_chunks: list[dict] = []
+    error = ""
+
+    try:
+        if "simulate_model_response" in payload:
+            raw_response_text = coerce_raw_model_response(payload.get("simulate_model_response"))
+        elif should_call_live_model(payload):
+            provider_result = call_training_model_provider(prompt, payload)
+            raw_response_text = provider_result.get("raw_text") or ""
+            if not provider_result.get("ok"):
+                raise ValueError(provider_result.get("error") or provider_result.get("fallback_reason") or "模型调用失败")
+        else:
+            raw_response_text = build_mock_training_response(source_title, entries, source_tags)
+        parsed = parse_training_response(raw_response_text)
+        normalized_chunks = normalize_training_chunks(parsed)
+        if not normalized_chunks:
+            raise ValueError("模型输出没有可用知识片段")
+    except ValueError as exc:
+        error = str(exc)
+        run.status = "failed"
+        run.error = error
+        run.raw_response = raw_response_text
+        run.parsed_response = parsed
+        run.draft_count = 0
+        run.completed_at = utc_now()
+        session.commit()
+        session.refresh(run)
+        return serialize_training_run(run)
+
+    run.status = "completed"
+    run.raw_response = raw_response_text
+    run.parsed_response = parsed
+    run.draft_count = len(normalized_chunks)
+    run.completed_at = utc_now()
+    merged_source_tags = merge_tags(source_tags, normalize_tags(payload.get("tags") or []))
+    for index, chunk in enumerate(normalized_chunks, start=1):
+        session.add(
+            TrainingDraftChunk(
+                run_id=run.id,
+                title=chunk["title"],
+                content=chunk["content"],
+                domain=chunk["domain"],
+                tags=merge_tags(chunk["tags"], merged_source_tags),
+                confidence_x100=max(0, min(int(round(float(chunk.get("confidence") or 0) * 100)), 100)),
+                status="draft",
+                chunk_index=index,
+            )
+        )
+    session.commit()
+    run = get_training_run_model(session, run.id)
+    return serialize_training_run(run)
+
+
+def resolve_training_entries(session: Session, payload: dict) -> tuple[KnowledgeSource | None, list[dict], str, list[str]]:
+    source_id = nullable_int(payload.get("source_id"))
+    if source_id is not None:
+        source = session.get(KnowledgeSource, source_id)
+        if source is None:
+            raise ValueError("训练资料来源不存在。")
+        chunks = list_knowledge_chunks(session, source_id=source.id)
+        entries = [
+            {
+                "source_id": source.id,
+                "chunk_id": chunk["id"],
+                "title": chunk["title"],
+                "body": chunk["content"],
+                "tags": chunk["tags"],
+            }
+            for chunk in chunks
+        ]
+        if not entries and source.content:
+            entries = [{"source_id": source.id, "title": source.title, "body": source.content, "tags": source.tags}]
+        return source, entries, source.title, source.tags or []
+
+    content = payload.get("content") or ""
+    if not str(content).strip():
+        raise ValueError("请提供 source_id 或 content。")
+    title = (payload.get("title") or "临时训练资料").strip()
+    entries = [
+        {"source_id": "", "chunk_id": index, "title": chunk["title"], "body": chunk["content"], "tags": normalize_tags(payload.get("tags") or [])}
+        for index, chunk in enumerate(chunk_markdown(title, str(content)), start=1)
+    ]
+    return None, entries, title, normalize_tags(payload.get("tags") or [])
+
+
+def build_mock_training_response(source_title: str, entries: list[dict], source_tags: list[str]) -> str:
+    chunks = []
+    for entry in entries[:3]:
+        title = entry.get("title") or source_title
+        body = compact_text(entry.get("body") or entry.get("content") or "", 180)
+        if not body:
+            continue
+        chunks.append(
+            {
+                "title": f"{title} 训练规则",
+                "body": body,
+                "domain": "astrology",
+                "tags": merge_tags(source_tags, entry.get("tags") or [], ["mock_training"]),
+                "rule_type": "mock_extraction",
+                "use_when": "用于本地开发和接口联调",
+                "avoid_when": "不要把 mock 结果当成最终训练结论",
+                "examples": [],
+                "confidence": 0.6,
+            }
+        )
+    return json.dumps({"chunks": chunks}, ensure_ascii=False)
+
+
+def compact_text(text: str, limit: int) -> str:
+    clean = " ".join(str(text or "").split())
+    if len(clean) <= limit:
+        return clean
+    return clean[:limit].rstrip("，。；、 ") + "..."
+
+
+def call_training_model_provider(prompt: str, payload: dict) -> dict:
+    settings = get_settings()
+    if not settings.openai_api_key:
+        return {"ok": False, "fallback_reason": "provider_key_missing", "error": "NEXA_OPENAI_API_KEY is not configured", "raw_text": ""}
+
+    endpoint = settings.openai_base_url.rstrip("/") + "/responses"
+    model_name = payload.get("model_name") or "gpt-5.4-mini"
+    request_body = {
+        "model": model_name,
+        "input": [
+            {"role": "system", "content": TRAINING_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        "store": False,
+        "max_output_tokens": int(payload.get("max_output_tokens") or 1200),
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "nexa_training_extraction",
+                "strict": False,
+                "schema": TRAINING_OUTPUT_SCHEMA,
+            }
+        },
+    }
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {settings.openai_api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=settings.model_request_timeout_seconds) as response:
+            response_payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        return {"ok": False, "fallback_reason": "model_provider_error", "error": detail, "raw_text": detail}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+        return {"ok": False, "fallback_reason": "model_provider_error", "error": str(error), "raw_text": str(error)}
+
+    raw_text = extract_openai_output_text(response_payload)
+    return {
+        "ok": bool(raw_text),
+        "fallback_reason": "" if raw_text else "empty_model_response",
+        "error": "" if raw_text else "OpenAI response did not include output text",
+        "raw_text": raw_text,
+    }
+
+
+def list_training_runs(session: Session, limit: int = 30) -> list[dict]:
+    runs = session.scalars(
+        select(TrainingRun)
+        .options(selectinload(TrainingRun.draft_chunks), joinedload(TrainingRun.source), joinedload(TrainingRun.published_source))
+        .order_by(TrainingRun.created_at.desc(), TrainingRun.id.desc())
+        .limit(limit)
+    ).all()
+    return [serialize_training_run(run, include_raw=False) for run in runs]
+
+
+def get_training_run(session: Session, run_id: int) -> dict | None:
+    run = get_training_run_model(session, run_id)
+    return serialize_training_run(run) if run else None
+
+
+def get_training_run_model(session: Session, run_id: int) -> TrainingRun | None:
+    return session.scalar(
+        select(TrainingRun)
+        .where(TrainingRun.id == run_id)
+        .options(selectinload(TrainingRun.draft_chunks), joinedload(TrainingRun.source), joinedload(TrainingRun.published_source))
+    )
+
+
+def publish_training_run(session: Session, run_id: int, payload: dict) -> dict | None:
+    run = get_training_run_model(session, run_id)
+    if run is None:
+        return None
+    draft_chunks = [chunk for chunk in sorted(run.draft_chunks, key=lambda item: item.chunk_index) if chunk.status == "draft"]
+    if not draft_chunks:
+        raise ValueError("没有可发布的训练草稿。")
+
+    tags = merge_tags(
+        normalize_tags(payload.get("tags") or []),
+        ["ai_training"],
+        [tag for chunk in draft_chunks for tag in (chunk.tags or [])],
+    )
+    content = "\n\n".join(f"# {chunk.title}\n{chunk.content}" for chunk in draft_chunks)
+    source = KnowledgeSource(
+        title=(payload.get("title") or f"AI 训练：{run.title}").strip(),
+        source_type="ai_training",
+        content=content,
+        tags=tags,
+        status="active",
+    )
+    session.add(source)
+    session.flush()
+    chunks = chunk_markdown(source.title, content)
+    for index, chunk in enumerate(chunks, start=1):
+        session.add(
+            KnowledgeChunk(
+                source_id=source.id,
+                title=chunk["title"],
+                content=chunk["content"],
+                tags=tags,
+                chunk_index=index,
+            )
+        )
+    source.chunk_count = len(chunks)
+    for chunk in draft_chunks:
+        chunk.status = "published"
+    run.status = "published"
+    run.published_source_id = source.id
+    run.completed_at = utc_now()
+    session.commit()
+    run = get_training_run_model(session, run.id)
+    result = serialize_training_run(run)
+    result["published_source"] = serialize_source(source)
+    return result
+
+
+def serialize_training_run(run: TrainingRun, include_raw: bool = True) -> dict:
+    data = {
+        "id": run.id,
+        "source_id": run.source_id,
+        "source_title": run.source.title if run.source else "",
+        "published_source_id": run.published_source_id,
+        "title": run.title,
+        "status": run.status,
+        "error": run.error,
+        "draft_count": run.draft_count,
+        "created_by": run.created_by,
+        "created_at": run.created_at.isoformat(),
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        "draft_chunks": [serialize_training_draft_chunk(chunk) for chunk in sorted(run.draft_chunks, key=lambda item: item.chunk_index)],
+    }
+    if include_raw:
+        data["prompt"] = run.prompt
+        data["raw_response"] = run.raw_response
+        data["parsed_response"] = run.parsed_response or {}
+    return data
+
+
+def serialize_training_draft_chunk(chunk: TrainingDraftChunk) -> dict:
+    return {
+        "id": chunk.id,
+        "run_id": chunk.run_id,
+        "title": chunk.title,
+        "content": chunk.content,
+        "domain": chunk.domain,
+        "tags": chunk.tags or [],
+        "confidence": chunk.confidence_x100 / 100,
+        "status": chunk.status,
+        "chunk_index": chunk.chunk_index,
+        "created_at": chunk.created_at.isoformat(),
+    }
 
 
 def list_knowledge_sources(session: Session) -> list[dict]:

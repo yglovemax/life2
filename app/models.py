@@ -250,6 +250,45 @@ class KnowledgeChunk(Base):
     source: Mapped[KnowledgeSource] = relationship(back_populates="chunks")
 
 
+class TrainingRun(Base):
+    __tablename__ = "training_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_id: Mapped[int | None] = mapped_column(ForeignKey("knowledge_sources.id"), nullable=True, index=True)
+    published_source_id: Mapped[int | None] = mapped_column(ForeignKey("knowledge_sources.id"), nullable=True)
+    title: Mapped[str] = mapped_column(String(180))
+    status: Mapped[str] = mapped_column(String(40), default="running", index=True)
+    prompt: Mapped[str] = mapped_column(Text, default="")
+    raw_response: Mapped[str] = mapped_column(Text, default="")
+    parsed_response: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str] = mapped_column(Text, default="")
+    draft_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[str] = mapped_column(String(80), default="admin")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    source: Mapped[KnowledgeSource | None] = relationship(foreign_keys=[source_id])
+    published_source: Mapped[KnowledgeSource | None] = relationship(foreign_keys=[published_source_id])
+    draft_chunks: Mapped[list[TrainingDraftChunk]] = relationship(back_populates="run", cascade="all, delete-orphan")
+
+
+class TrainingDraftChunk(Base):
+    __tablename__ = "training_draft_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("training_runs.id"), index=True)
+    title: Mapped[str] = mapped_column(String(180))
+    content: Mapped[str] = mapped_column(Text, default="")
+    domain: Mapped[str] = mapped_column(String(80), default="astrology")
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    confidence_x100: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(40), default="draft", index=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    run: Mapped[TrainingRun] = relationship(back_populates="draft_chunks")
+
+
 class AppApiKey(Base):
     __tablename__ = "app_api_keys"
 

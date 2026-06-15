@@ -21,6 +21,7 @@ Phase 1 已完成第一版闭环：
 - 成本中心和 Fallback 告警
 - 发布中心、灰度、上线、回滚
 - App 页面级 / 模块级 JSON API
+- 训练资料上传、GitHub 导入和 AI 训练草稿发布 API
 - 正式调用与测试调用隔离
 - App Key 管理和安全审计
 - 后台登录、管理员会话和敏感接口保护
@@ -57,6 +58,7 @@ export NEXA_OPENAI_API_KEY="<openai_api_key>"
 后台保存的模型供应商 Key 只做配置、脱敏展示和审计占位；实际运行时 Key 读取 `NEXA_OPENAI_API_KEY`，避免数据库保存可逆明文密钥。
 
 App 对接说明见：`docs/app-api.md`
+后端集成边界见：`docs/backend-integration.md`
 安全审计说明见：`docs/security.md`
 旧项目复用清单见：`docs/reuse-inventory.md`
 

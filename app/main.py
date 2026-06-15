@@ -20,7 +20,9 @@ from app.services import (
     create_model_provider_key,
     create_module,
     create_output_policy,
+    create_training_run,
     get_module_detail,
+    get_training_run,
     import_github_knowledge_sources,
     list_app_api_keys,
     list_audit_events,
@@ -36,9 +38,11 @@ from app.services import (
     list_output_policies,
     list_pages,
     list_test_users,
+    list_training_runs,
     login_admin,
     metrics,
     publish_module,
+    publish_training_run,
     preview_model_route,
     record_audit_event,
     rollback_module,
@@ -260,6 +264,38 @@ def knowledge_chunks(tag: str | None = None, source_id: int | None = None, sessi
 @app.post("/api/knowledge/search")
 def knowledge_search(payload: dict, session: Session = Depends(get_session)) -> dict:
     return {"items": search_knowledge(session, payload)}
+
+
+@app.get("/api/training/runs")
+def training_runs(session: Session = Depends(get_session)) -> dict:
+    return {"items": list_training_runs(session)}
+
+
+@app.post("/api/training/runs")
+def training_run_create(payload: dict, session: Session = Depends(get_session)) -> dict:
+    try:
+        return create_training_run(session, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/training/runs/{run_id}")
+def training_run_detail(run_id: int, session: Session = Depends(get_session)) -> dict:
+    run = get_training_run(session, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="training run not found")
+    return run
+
+
+@app.post("/api/training/runs/{run_id}/publish")
+def training_run_publish(run_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
+    try:
+        run = publish_training_run(session, run_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if run is None:
+        raise HTTPException(status_code=404, detail="training run not found")
+    return run
 
 
 @app.post("/api/modules")
