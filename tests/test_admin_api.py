@@ -460,3 +460,70 @@ def test_app_page_api_renders_live_or_gray_modules_only():
     assert live_module["slug"] in slugs
     assert draft_module["slug"] not in slugs
     assert all(item["trace_id"] for item in data["modules"])
+
+
+def test_invalid_app_token_is_written_to_security_audit_log():
+    response = client.post(
+        "/api/app/modules/birth-basic-chart-info/render",
+        headers={"Authorization": "Bearer wrong-token"},
+        json={"input_payload": {"sun_sign": "白羊座"}},
+    )
+
+    assert response.status_code == 401
+    events = client.get("/api/security/audit-events?event_type=app_auth_failed").json()["items"]
+    assert events
+    assert events[0]["event_type"] == "app_auth_failed"
+    assert events[0]["severity"] == "warning"
+    assert "wrong-token" not in str(events[0])
+
+
+def test_app_key_can_be_created_used_once_returned_and_listed_without_secret():
+    module = client.get("/api/modules").json()["items"][0]
+    client.post(f"/api/modules/{module['id']}/publish", json={"status": "live", "operator": "qa"})
+
+    create_response = client.post(
+        "/api/security/app-keys",
+        json={"name": "iOS App Production", "scopes": ["app:render"]},
+    )
+    assert create_response.status_code == 200
+    created = create_response.json()
+    token = created["token"]
+    assert token.startswith("nexa_")
+    assert created["key"]["name"] == "iOS App Production"
+    assert created["key"]["status"] == "active"
+
+    keys = client.get("/api/security/app-keys").json()["items"]
+    assert any(item["id"] == created["key"]["id"] for item in keys)
+    assert token not in str(keys)
+    assert all("token_hash" not in item for item in keys)
+
+    app_response = client.post(
+        f"/api/app/modules/{module['slug']}/render",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"user_id": "app_user_001", "input_payload": {"sun_sign": "白羊座"}},
+    )
+    assert app_response.status_code == 200
+    assert app_response.json()["meta"]["request_type"] == "official"
+
+
+def test_revoked_app_key_cannot_call_app_api_and_security_status_counts_it():
+    module = client.get("/api/modules").json()["items"][0]
+    client.post(f"/api/modules/{module['id']}/publish", json={"status": "live", "operator": "qa"})
+    created = client.post("/api/security/app-keys", json={"name": "Temporary Partner Key"}).json()
+    token = created["token"]
+
+    revoke_response = client.post(f"/api/security/app-keys/{created['key']['id']}/revoke", json={"operator": "admin"})
+    assert revoke_response.status_code == 200
+    assert revoke_response.json()["status"] == "revoked"
+
+    app_response = client.post(
+        f"/api/app/modules/{module['slug']}/render",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"user_id": "app_user_001", "input_payload": {"sun_sign": "白羊座"}},
+    )
+    assert app_response.status_code == 401
+
+    status = client.get("/api/security/status").json()
+    assert status["app_keys"]["revoked"] >= 1
+    assert status["audit_events"]["total"] >= 1
+    assert status["token_policy"]["using_default_dev_token"] is True

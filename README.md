@@ -18,6 +18,7 @@ Phase 1 已完成第一版闭环：
 - 发布中心、灰度、上线、回滚
 - App 页面级 / 模块级 JSON API
 - 正式调用与测试调用隔离
+- App Key 管理和安全审计
 
 ## 本地运行
 
@@ -34,6 +35,7 @@ uvicorn app.main:app --reload --port 8812
 - API 文档：http://127.0.0.1:8812/docs
 
 App 对接说明见：`docs/app-api.md`
+安全审计说明见：`docs/security.md`
 
 ## 测试
 

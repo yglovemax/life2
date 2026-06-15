@@ -570,6 +570,30 @@ label {
   overflow-wrap: anywhere;
 }
 
+.token-box {
+  border: 1px solid #d7bd7d;
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 12px;
+  background: #fff8df;
+  display: grid;
+  gap: 8px;
+}
+
+.token-box span {
+  color: var(--red);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.token-box code {
+  border: 1px solid #ead6a2;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1100px) {
   body {
     grid-template-columns: 1fr;

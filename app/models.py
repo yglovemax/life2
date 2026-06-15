@@ -29,6 +29,11 @@ class IssueStatus(str, Enum):
     resolved = "resolved"
 
 
+class AppKeyStatus(str, Enum):
+    active = "active"
+    revoked = "revoked"
+
+
 class Page(Base):
     __tablename__ = "pages"
 
@@ -198,3 +203,32 @@ class KnowledgeChunk(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     source: Mapped[KnowledgeSource] = relationship(back_populates="chunks")
+
+
+class AppApiKey(Base):
+    __tablename__ = "app_api_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(160))
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    token_prefix: Mapped[str] = mapped_column(String(24), index=True)
+    status: Mapped[str] = mapped_column(String(40), default=AppKeyStatus.active.value)
+    scopes: Mapped[list] = mapped_column(JSON, default=list)
+    created_by: Mapped[str] = mapped_column(String(80), default="admin")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(80), index=True)
+    actor: Mapped[str] = mapped_column(String(160), default="system")
+    target_type: Mapped[str] = mapped_column(String(80), default="")
+    target_id: Mapped[str] = mapped_column(String(120), default="")
+    severity: Mapped[str] = mapped_column(String(40), default="info")
+    status: Mapped[str] = mapped_column(String(40), default="ok")
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

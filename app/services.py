@@ -1,9 +1,14 @@
+import hashlib
+import secrets
 from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models import (
+    AppApiKey,
+    AppKeyStatus,
+    AuditEvent,
     CallTrace,
     FieldContract,
     KnowledgeChunk,
@@ -14,6 +19,7 @@ from app.models import (
     ModuleVersion,
     Page,
     PromptTemplate,
+    utc_now,
 )
 
 
@@ -836,6 +842,163 @@ def module_release_snapshot(module: Module, payload: dict, action: str) -> dict:
         },
         "prompt": {key: getattr(prompt, key) for key in PROMPT_KEYS},
         "fields": [serialize_field(field) for field in module.fields],
+    }
+
+
+def create_app_api_key(session: Session, payload: dict) -> dict:
+    token = generate_app_token()
+    key = AppApiKey(
+        name=(payload.get("name") or "未命名 App Key").strip(),
+        token_hash=hash_token(token),
+        token_prefix=token[:12],
+        scopes=payload.get("scopes") or ["app:render"],
+        created_by=payload.get("operator") or "admin",
+        status=AppKeyStatus.active.value,
+    )
+    session.add(key)
+    session.commit()
+    session.refresh(key)
+    record_audit_event(
+        session,
+        event_type="app_key_created",
+        actor=key.created_by,
+        target_type="app_api_key",
+        target_id=str(key.id),
+        severity="info",
+        details={"name": key.name, "scopes": key.scopes},
+    )
+    return {"token": token, "key": serialize_app_api_key(key)}
+
+
+def list_app_api_keys(session: Session) -> list[dict]:
+    keys = session.scalars(select(AppApiKey).order_by(AppApiKey.created_at.desc(), AppApiKey.id.desc())).all()
+    return [serialize_app_api_key(key) for key in keys]
+
+
+def revoke_app_api_key(session: Session, key_id: int, payload: dict) -> dict | None:
+    key = session.get(AppApiKey, key_id)
+    if key is None:
+        return None
+    key.status = AppKeyStatus.revoked.value
+    key.revoked_at = utc_now()
+    session.commit()
+    session.refresh(key)
+    record_audit_event(
+        session,
+        event_type="app_key_revoked",
+        actor=payload.get("operator") or "admin",
+        target_type="app_api_key",
+        target_id=str(key.id),
+        severity="warning",
+        details={"name": key.name},
+    )
+    return serialize_app_api_key(key)
+
+
+def authenticate_app_token(session: Session, token: str, default_token: str) -> dict | None:
+    if token and token == default_token:
+        return {"key_id": None, "name": "Default Dev Token", "source": "settings", "scopes": ["app:render"]}
+    if not token:
+        return None
+    key = session.scalar(select(AppApiKey).where(AppApiKey.token_hash == hash_token(token)))
+    if key is None or key.status != AppKeyStatus.active.value:
+        return None
+    key.last_used_at = utc_now()
+    session.commit()
+    return {"key_id": key.id, "name": key.name, "source": "database", "scopes": key.scopes}
+
+
+def serialize_app_api_key(key: AppApiKey) -> dict:
+    return {
+        "id": key.id,
+        "name": key.name,
+        "token_prefix": key.token_prefix,
+        "status": key.status,
+        "scopes": key.scopes,
+        "created_by": key.created_by,
+        "created_at": key.created_at.isoformat(),
+        "last_used_at": key.last_used_at.isoformat() if key.last_used_at else None,
+        "revoked_at": key.revoked_at.isoformat() if key.revoked_at else None,
+    }
+
+
+def generate_app_token() -> str:
+    return f"nexa_{secrets.token_urlsafe(32)}"
+
+
+def hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def record_audit_event(
+    session: Session,
+    event_type: str,
+    actor: str = "system",
+    target_type: str = "",
+    target_id: str = "",
+    severity: str = "info",
+    status: str = "ok",
+    details: dict | None = None,
+) -> dict:
+    event = AuditEvent(
+        event_type=event_type,
+        actor=actor,
+        target_type=target_type,
+        target_id=target_id,
+        severity=severity,
+        status=status,
+        details=details or {},
+    )
+    session.add(event)
+    session.commit()
+    session.refresh(event)
+    return serialize_audit_event(event)
+
+
+def list_audit_events(session: Session, event_type: str | None = None, limit: int = 50) -> list[dict]:
+    statement = select(AuditEvent).order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc()).limit(limit)
+    if event_type:
+        statement = select(AuditEvent).where(AuditEvent.event_type == event_type).order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc()).limit(limit)
+    events = session.scalars(statement).all()
+    return [serialize_audit_event(event) for event in events]
+
+
+def serialize_audit_event(event: AuditEvent) -> dict:
+    return {
+        "id": event.id,
+        "event_type": event.event_type,
+        "actor": event.actor,
+        "target_type": event.target_type,
+        "target_id": event.target_id,
+        "severity": event.severity,
+        "status": event.status,
+        "details": event.details,
+        "created_at": event.created_at.isoformat(),
+    }
+
+
+def security_status(session: Session, default_token: str) -> dict:
+    active_keys = session.scalar(select(func.count(AppApiKey.id)).where(AppApiKey.status == AppKeyStatus.active.value)) or 0
+    revoked_keys = session.scalar(select(func.count(AppApiKey.id)).where(AppApiKey.status == AppKeyStatus.revoked.value)) or 0
+    audit_count = session.scalar(select(func.count(AuditEvent.id))) or 0
+    warning_count = session.scalar(select(func.count(AuditEvent.id)).where(AuditEvent.severity == "warning")) or 0
+    failed_auth_count = session.scalar(select(func.count(AuditEvent.id)).where(AuditEvent.event_type == "app_auth_failed")) or 0
+    return {
+        "token_policy": {
+            "using_default_dev_token": default_token == "dev-app-token",
+            "managed_keys_enabled": True,
+            "default_token_prefix": default_token[:4] + "***" if default_token else "",
+        },
+        "app_keys": {
+            "active": active_keys,
+            "revoked": revoked_keys,
+        },
+        "audit_events": {
+            "total": audit_count,
+            "warnings": warning_count,
+            "failed_auth": failed_auth_count,
+        },
+        "recent_events": list_audit_events(session, limit=8),
     }
 
 

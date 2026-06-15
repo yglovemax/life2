@@ -22,7 +22,7 @@
         <button data-view="cost-center">成本中心</button>
         <button data-view="release-center">发布中心</button>
         <button data-view="app-api">App 接口</button>
-        <button>安全审计</button>
+        <button data-view="security">安全审计</button>
       </nav>
     </aside>
 
@@ -368,6 +368,60 @@
             <section class="section">
               <h3>最近正式调用</h3>
               <div id="officialTraceList" class="trace-list"></div>
+            </section>
+          </div>
+        </section>
+      </section>
+
+      <section class="layout hidden" id="securityView">
+        <section class="panel module-center">
+          <div class="panel-head">
+            <div>
+              <p>Security</p>
+              <h2>安全审计</h2>
+            </div>
+            <button class="secondary compact" id="refreshSecurityButton">刷新</button>
+          </div>
+          <div class="detail-body">
+            <div id="securityNotice"></div>
+            <section>
+              <h3>安全状态</h3>
+              <div class="insight-grid" id="securitySummaryCards"></div>
+            </section>
+
+            <section class="section">
+              <h3>创建 App Key</h3>
+              <div class="form-grid">
+                <label>Key 名称
+                  <input id="securityKeyName" placeholder="例如：iOS App Production" />
+                </label>
+                <label>权限范围
+                  <input id="securityKeyScopes" value="app:render" />
+                </label>
+              </div>
+              <div class="actions">
+                <button class="primary" id="createAppKeyButton">生成 App Key</button>
+              </div>
+              <div id="createdAppKeyBox"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel detail">
+          <div class="panel-head">
+            <div>
+              <p>Keys & Events</p>
+              <h2>Key 与审计日志</h2>
+            </div>
+          </div>
+          <div class="detail-body">
+            <section>
+              <h3>App Keys</h3>
+              <div class="trace-list" id="securityKeyList"></div>
+            </section>
+            <section class="section">
+              <h3>审计事件</h3>
+              <div class="trace-list" id="auditEventList"></div>
             </section>
           </div>
         </section>

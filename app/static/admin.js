@@ -12,6 +12,10 @@ let costSummaryData = null;
 let fallbackAlerts = [];
 let releaseVersions = [];
 let latestAppApiResult = null;
+let securityStatus = null;
+let appKeys = [];
+let auditEvents = [];
+let createdAppToken = "";
 
 const promptLabels = {
   shared_prefix: "共享静态前缀",
@@ -451,11 +455,13 @@ function showView(view) {
   document.querySelector("#costCenterView").classList.toggle("hidden", view !== "cost-center");
   document.querySelector("#releaseCenterView").classList.toggle("hidden", view !== "release-center");
   document.querySelector("#appApiView").classList.toggle("hidden", view !== "app-api");
+  document.querySelector("#securityView").classList.toggle("hidden", view !== "security");
   if (view === "test-center") renderTestCenter();
   if (view === "knowledge") renderKnowledgeWorkspace();
   if (view === "cost-center") renderCostCenter();
   if (view === "release-center") renderReleaseCenter();
   if (view === "app-api") renderAppApiWorkspace();
+  if (view === "security") renderSecurityWorkspace();
 }
 
 function renderTestCenter() {
@@ -976,12 +982,125 @@ async function loadOfficialTraces() {
   document.querySelector("#officialTraceList").innerHTML = data.items.length ? data.items.map(traceCard).join("") : '<p class="empty">暂无正式调用。</p>';
 }
 
+function setupSecurityActions() {
+  document.querySelector("#refreshSecurityButton").onclick = renderSecurityWorkspace;
+  document.querySelector("#createAppKeyButton").onclick = createAppKey;
+}
+
+async function renderSecurityWorkspace() {
+  await loadSecurityData();
+  renderSecurityStatus();
+  renderAppKeys();
+  renderAuditEvents();
+}
+
+async function loadSecurityData() {
+  const [statusData, keyData, eventData] = await Promise.all([
+    getJson("/api/security/status"),
+    getJson("/api/security/app-keys"),
+    getJson("/api/security/audit-events"),
+  ]);
+  securityStatus = statusData;
+  appKeys = keyData.items;
+  auditEvents = eventData.items;
+}
+
+function renderSecurityStatus() {
+  if (!securityStatus) return;
+  const cards = [
+    ["活跃 Key", securityStatus.app_keys.active],
+    ["已撤销 Key", securityStatus.app_keys.revoked],
+    ["审计事件", securityStatus.audit_events.total],
+    ["鉴权失败", securityStatus.audit_events.failed_auth],
+  ];
+  document.querySelector("#securitySummaryCards").innerHTML = cards
+    .map(([label, value]) => `<article class="mini-card"><span>${label}</span><strong>${value}</strong></article>`)
+    .join("");
+  const notice = securityStatus.token_policy.using_default_dev_token
+    ? "当前仍启用本地默认 dev token，生产环境需要换成独立 token 或托管 App Key。"
+    : "当前默认 token 已由环境变量覆盖。";
+  document.querySelector("#securityNotice").innerHTML = `<div class="${securityStatus.token_policy.using_default_dev_token ? "danger" : "notice"}">${escapeHtml(notice)}</div>`;
+}
+
+async function createAppKey() {
+  const notice = document.querySelector("#securityNotice");
+  try {
+    const name = document.querySelector("#securityKeyName").value.trim();
+    if (!name) throw new Error("Key 名称不能为空");
+    const created = await getJson("/api/security/app-keys", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        scopes: document.querySelector("#securityKeyScopes").value.split(/[,，\s]+/).map((item) => item.trim()).filter(Boolean),
+        operator: "admin",
+      }),
+    });
+    createdAppToken = created.token;
+    document.querySelector("#createdAppKeyBox").innerHTML = `<article class="token-box">
+      <span>只显示一次</span>
+      <strong>${escapeHtml(created.key.name)}</strong>
+      <code>${escapeHtml(created.token)}</code>
+    </article>`;
+    notice.innerHTML = `<div class="notice">App Key 已创建，请立即保存 token。</div>`;
+    document.querySelector("#securityKeyName").value = "";
+    await renderSecurityWorkspace();
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderAppKeys() {
+  document.querySelector("#securityKeyList").innerHTML = appKeys.length
+    ? appKeys.map(appKeyCard).join("")
+    : '<p class="empty">还没有托管 App Key。</p>';
+}
+
+function appKeyCard(key) {
+  return `<article class="trace-card">
+    <span>#${key.id} · ${escapeHtml(key.status)} · ${escapeHtml(key.token_prefix)}***</span>
+    <p><strong>${escapeHtml(key.name)}</strong></p>
+    <p>权限：${escapeHtml((key.scopes || []).join(", "))}</p>
+    <p>创建：${formatDateTime(key.created_at)}${key.last_used_at ? ` · 最近使用：${formatDateTime(key.last_used_at)}` : ""}</p>
+    ${key.status === "active" ? `<button class="danger compact" onclick="revokeAppKey(${key.id})">撤销 Key</button>` : ""}
+  </article>`;
+}
+
+async function revokeAppKey(keyId) {
+  const notice = document.querySelector("#securityNotice");
+  try {
+    const revoked = await getJson(`/api/security/app-keys/${keyId}/revoke`, {
+      method: "POST",
+      body: JSON.stringify({ operator: "admin" }),
+    });
+    notice.innerHTML = `<div class="notice">${escapeHtml(revoked.name)} 已撤销</div>`;
+    await renderSecurityWorkspace();
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderAuditEvents() {
+  document.querySelector("#auditEventList").innerHTML = auditEvents.length
+    ? auditEvents.map(auditEventCard).join("")
+    : '<p class="empty">暂无审计事件。</p>';
+}
+
+function auditEventCard(event) {
+  return `<article class="trace-card ${event.severity === "warning" ? "alert-card" : ""}">
+    <span>#${event.id} · ${escapeHtml(event.event_type)} · ${escapeHtml(event.severity)} · ${formatDateTime(event.created_at)}</span>
+    <p><strong>${escapeHtml(event.actor)}</strong></p>
+    <p>对象：${escapeHtml(event.target_type || "-")} ${escapeHtml(event.target_id || "")}</p>
+    <pre>${escapeHtml(JSON.stringify(event.details || {}, null, 2))}</pre>
+  </article>`;
+}
+
 async function boot() {
   setupNavigation();
   setupKnowledgeActions();
   setupCostActions();
   setupReleaseActions();
   setupAppApiActions();
+  setupSecurityActions();
   document.querySelector("#createModuleButton").onclick = newModuleDraft;
   await loadMetadata();
   await loadMetrics();
