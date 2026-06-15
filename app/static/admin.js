@@ -17,6 +17,9 @@ let appKeys = [];
 let auditEvents = [];
 let issueItems = [];
 let issueSummaryItems = [];
+let modelProviderKeys = [];
+let outputPolicies = [];
+let latestRouterPreview = null;
 let createdAppToken = "";
 let adminToken = localStorage.getItem("nexa_admin_token") || "";
 let adminUser = null;
@@ -559,6 +562,7 @@ function showView(view) {
   document.querySelector("#knowledgeView").classList.toggle("hidden", view !== "knowledge");
   document.querySelector("#costCenterView").classList.toggle("hidden", view !== "cost-center");
   document.querySelector("#releaseCenterView").classList.toggle("hidden", view !== "release-center");
+  document.querySelector("#modelRouterView").classList.toggle("hidden", view !== "model-router");
   document.querySelector("#appApiView").classList.toggle("hidden", view !== "app-api");
   document.querySelector("#securityView").classList.toggle("hidden", view !== "security");
   if (view === "test-center") renderTestCenter();
@@ -566,6 +570,7 @@ function showView(view) {
   if (view === "knowledge") renderKnowledgeWorkspace();
   if (view === "cost-center") renderCostCenter();
   if (view === "release-center") renderReleaseCenter();
+  if (view === "model-router") renderModelRouterWorkspace();
   if (view === "app-api") renderAppApiWorkspace();
   if (view === "security") renderSecurityWorkspace();
 }
@@ -1118,6 +1123,188 @@ async function rollbackSelectedModule() {
   }
 }
 
+function setupModelRouterActions() {
+  document.querySelector("#refreshModelRouterButton").onclick = renderModelRouterWorkspace;
+  document.querySelector("#createModelKeyButton").onclick = createModelProviderKey;
+  document.querySelector("#createOutputPolicyButton").onclick = createOutputPolicy;
+  document.querySelector("#previewRouterButton").onclick = previewModelRouter;
+}
+
+async function renderModelRouterWorkspace() {
+  await loadModelRouterData();
+  renderModelRouterControls();
+  renderModelProviderKeys();
+  renderOutputPolicies();
+  renderRouterPreviewResult();
+}
+
+async function loadModelRouterData() {
+  const [keyData, policyData] = await Promise.all([
+    getJson("/api/model-provider-keys"),
+    getJson("/api/output-policies"),
+  ]);
+  modelProviderKeys = keyData.items;
+  outputPolicies = policyData.items;
+}
+
+function renderModelRouterControls() {
+  const modelOptions = `<option value="">自动选择</option>${modelConfigs
+    .map((model) => `<option value="${model.id}">${escapeHtml(model.display_name)} · ${escapeHtml(model.quality_tier)}</option>`)
+    .join("")}`;
+  document.querySelector("#policyPrimaryModel").innerHTML = modelOptions;
+  document.querySelector("#policyFallbackModel").innerHTML = modelOptions;
+
+  const moduleSelect = document.querySelector("#routerPreviewModule");
+  const selectedModule = moduleSelect.value || String(modules[0]?.id || "");
+  moduleSelect.innerHTML = modules
+    .map((module) => `<option value="${module.id}">${escapeHtml(module.page_name)} / ${escapeHtml(module.name)}</option>`)
+    .join("");
+  moduleSelect.value = selectedModule && modules.some((module) => String(module.id) === String(selectedModule)) ? selectedModule : String(modules[0]?.id || "");
+
+  const policySelect = document.querySelector("#routerPreviewPolicy");
+  const selectedPolicy = policySelect.value || String(outputPolicies[0]?.id || "");
+  policySelect.innerHTML = outputPolicies.length
+    ? outputPolicies.map((policy) => `<option value="${policy.id}">${escapeHtml(policy.name)}${policy.is_default ? " · 默认" : ""}</option>`).join("")
+    : '<option value="">临时策略</option>';
+  policySelect.value = selectedPolicy && outputPolicies.some((policy) => String(policy.id) === String(selectedPolicy)) ? selectedPolicy : String(outputPolicies[0]?.id || "");
+}
+
+async function createModelProviderKey() {
+  const notice = document.querySelector("#modelRouterNotice");
+  try {
+    const name = document.querySelector("#modelKeyName").value.trim();
+    const provider = document.querySelector("#modelKeyProvider").value.trim() || "openai";
+    const apiKey = document.querySelector("#modelKeyValue").value.trim();
+    if (!name) throw new Error("Key 名称不能为空");
+    if (!apiKey) throw new Error("API Key 不能为空");
+    const created = await getJson("/api/model-provider-keys", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        provider,
+        api_key: apiKey,
+        operator: adminUser?.username || "admin",
+      }),
+    });
+    document.querySelector("#createdModelKeyBox").innerHTML = `<article class="token-box">
+      <span>只显示一次</span>
+      <strong>${escapeHtml(created.key.name)}</strong>
+      <code>${escapeHtml(created.api_key)}</code>
+    </article>`;
+    notice.innerHTML = `<div class="notice">模型 Key 已保存，请立即转存明文。</div>`;
+    document.querySelector("#modelKeyName").value = "";
+    document.querySelector("#modelKeyValue").value = "";
+    await renderModelRouterWorkspace();
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function createOutputPolicy() {
+  const notice = document.querySelector("#modelRouterNotice");
+  try {
+    const name = document.querySelector("#policyName").value.trim();
+    if (!name) throw new Error("策略名称不能为空");
+    const policy = await getJson("/api/output-policies", {
+      method: "POST",
+      body: JSON.stringify({
+        name,
+        quality_tier: document.querySelector("#policyQuality").value,
+        primary_model_id: document.querySelector("#policyPrimaryModel").value || null,
+        fallback_model_id: document.querySelector("#policyFallbackModel").value || null,
+        max_output_tokens: Number(document.querySelector("#policyMaxTokens").value || 680),
+        temperature_x100: Number(document.querySelector("#policyTemperature").value || 65),
+        response_format: document.querySelector("#policyResponseFormat").value,
+        safety_rules: document.querySelector("#policySafetyRules").value,
+        is_default: document.querySelector("#policyIsDefault").value === "true",
+      }),
+    });
+    notice.innerHTML = `<div class="notice">输出策略「${escapeHtml(policy.name)}」已保存</div>`;
+    document.querySelector("#policyName").value = "";
+    await renderModelRouterWorkspace();
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function previewModelRouter() {
+  const notice = document.querySelector("#modelRouterNotice");
+  try {
+    latestRouterPreview = await getJson("/api/model-router/preview", {
+      method: "POST",
+      body: JSON.stringify({
+        module_id: Number(document.querySelector("#routerPreviewModule").value || 0),
+        policy_id: document.querySelector("#routerPreviewPolicy").value || null,
+        input_payload: { source: "admin_model_router_preview" },
+      }),
+    });
+    notice.innerHTML = `<div class="notice">路由预览已生成</div>`;
+    renderRouterPreviewResult();
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderRouterPreviewResult() {
+  const container = document.querySelector("#routerPreviewResult");
+  if (!container) return;
+  if (!latestRouterPreview) {
+    container.innerHTML = '<p class="empty">还没有预览路由。</p>';
+    return;
+  }
+  container.innerHTML = `<article class="trace-card">
+    <span>${escapeHtml(latestRouterPreview.policy?.name || "临时策略")} · ${escapeHtml(latestRouterPreview.orchestration.response_format)}</span>
+    <p><strong>主模型：${escapeHtml(latestRouterPreview.selected_model?.display_name || "未配置")}</strong></p>
+    <p>备用模型：${escapeHtml(latestRouterPreview.fallback_model?.display_name || "未配置")}</p>
+    <p>最大输出：${latestRouterPreview.orchestration.max_output_tokens} tokens · 温度：${latestRouterPreview.orchestration.temperature_x100}</p>
+    <pre>${escapeHtml(JSON.stringify(latestRouterPreview.orchestration, null, 2))}</pre>
+  </article>`;
+}
+
+function renderModelProviderKeys() {
+  document.querySelector("#modelProviderKeyList").innerHTML = modelProviderKeys.length
+    ? modelProviderKeys.map(modelProviderKeyCard).join("")
+    : '<p class="empty">还没有模型供应商 Key。</p>';
+}
+
+function modelProviderKeyCard(key) {
+  return `<article class="trace-card">
+    <span>#${key.id} · ${escapeHtml(key.provider)} · ${escapeHtml(key.status)} · ${escapeHtml(key.token_prefix)}***</span>
+    <p><strong>${escapeHtml(key.name)}</strong></p>
+    <p>创建：${formatDateTime(key.created_at)}${key.revoked_at ? ` · 撤销：${formatDateTime(key.revoked_at)}` : ""}</p>
+    ${key.status === "active" ? `<button class="danger compact" onclick="revokeModelProviderKey(${key.id})">撤销 Key</button>` : ""}
+  </article>`;
+}
+
+async function revokeModelProviderKey(keyId) {
+  const notice = document.querySelector("#modelRouterNotice");
+  try {
+    const revoked = await getJson(`/api/model-provider-keys/${keyId}/revoke`, {
+      method: "POST",
+      body: JSON.stringify({ operator: adminUser?.username || "admin" }),
+    });
+    notice.innerHTML = `<div class="notice">${escapeHtml(revoked.name)} 已撤销</div>`;
+    await renderModelRouterWorkspace();
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderOutputPolicies() {
+  document.querySelector("#outputPolicyList").innerHTML = outputPolicies.length
+    ? outputPolicies.map(outputPolicyCard).join("")
+    : '<p class="empty">还没有输出策略。</p>';
+}
+
+function outputPolicyCard(policy) {
+  return `<article class="trace-card">
+    <span>#${policy.id} · ${escapeHtml(policy.quality_tier)}${policy.is_default ? " · 默认" : ""}</span>
+    <p><strong>${escapeHtml(policy.name)}</strong></p>
+    <p>主模型：${escapeHtml(policy.primary_model?.display_name || "自动选择")} · 备用：${escapeHtml(policy.fallback_model?.display_name || "自动选择")}</p>
+    <p>最大输出：${policy.max_output_tokens} tokens · 温度：${policy.temperature_x100} · 格式：${escapeHtml(policy.response_format)}</p>
+  </article>`;
+}
+
 function setupAppApiActions() {
   document.querySelector("#refreshAppApiButton").onclick = renderAppApiWorkspace;
   document.querySelector("#callAppPageButton").onclick = () => callAppApi("page");
@@ -1342,6 +1529,7 @@ async function initializeConsole() {
   setupKnowledgeActions();
   setupCostActions();
   setupReleaseActions();
+  setupModelRouterActions();
   setupAppApiActions();
   setupSecurityActions();
   document.querySelector("#createModuleButton").onclick = newModuleDraft;

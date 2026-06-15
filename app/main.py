@@ -17,7 +17,9 @@ from app.services import (
     create_knowledge_source,
     create_app_api_key,
     create_manual_knowledge_entry,
+    create_model_provider_key,
     create_module,
+    create_output_policy,
     get_module_detail,
     list_app_api_keys,
     list_audit_events,
@@ -27,19 +29,23 @@ from app.services import (
     list_knowledge_sources,
     list_call_traces,
     list_models,
+    list_model_provider_keys,
     list_module_versions,
     list_modules,
+    list_output_policies,
     list_pages,
     list_test_users,
     login_admin,
     metrics,
     publish_module,
+    preview_model_route,
     record_audit_event,
     rollback_module,
     render_app_module,
     render_app_page,
     revoke_admin_token,
     revoke_app_api_key,
+    revoke_model_provider_key,
     run_batch_tests,
     run_module_test,
     score_call_trace,
@@ -47,6 +53,7 @@ from app.services import (
     security_status,
     serialize_admin_user,
     update_module,
+    update_output_policy,
     update_issue,
 )
 
@@ -327,6 +334,58 @@ def issue_update(issue_id: int, payload: dict, session: Session = Depends(get_se
     if issue is None:
         raise HTTPException(status_code=404, detail="issue not found")
     return issue
+
+
+@app.get("/api/model-provider-keys")
+def model_provider_keys(_: AdminUser = Depends(require_admin_session), session: Session = Depends(get_session)) -> dict:
+    return {"items": list_model_provider_keys(session)}
+
+
+@app.post("/api/model-provider-keys")
+def model_provider_key_create(
+    payload: dict,
+    admin_user: AdminUser = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> dict:
+    payload = {**payload, "operator": payload.get("operator") or admin_user.username}
+    return create_model_provider_key(session, payload)
+
+
+@app.post("/api/model-provider-keys/{key_id}/revoke")
+def model_provider_key_revoke(
+    key_id: int,
+    payload: dict,
+    admin_user: AdminUser = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> dict:
+    payload = {**payload, "operator": payload.get("operator") or admin_user.username}
+    key = revoke_model_provider_key(session, key_id, payload)
+    if key is None:
+        raise HTTPException(status_code=404, detail="model provider key not found")
+    return key
+
+
+@app.get("/api/output-policies")
+def output_policies(session: Session = Depends(get_session)) -> dict:
+    return {"items": list_output_policies(session)}
+
+
+@app.post("/api/output-policies")
+def output_policy_create(payload: dict, _: AdminUser = Depends(require_admin_session), session: Session = Depends(get_session)) -> dict:
+    return create_output_policy(session, payload)
+
+
+@app.put("/api/output-policies/{policy_id}")
+def output_policy_update(policy_id: int, payload: dict, _: AdminUser = Depends(require_admin_session), session: Session = Depends(get_session)) -> dict:
+    policy = update_output_policy(session, policy_id, payload)
+    if policy is None:
+        raise HTTPException(status_code=404, detail="output policy not found")
+    return policy
+
+
+@app.post("/api/model-router/preview")
+def model_router_preview(payload: dict, session: Session = Depends(get_session)) -> dict:
+    return preview_model_route(session, payload)
 
 
 @app.get("/api/costs/summary")

@@ -39,6 +39,11 @@ class AdminSessionStatus(str, Enum):
     revoked = "revoked"
 
 
+class ModelProviderKeyStatus(str, Enum):
+    active = "active"
+    revoked = "revoked"
+
+
 class Page(Base):
     __tablename__ = "pages"
 
@@ -65,6 +70,41 @@ class ModelConfig(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     modules: Mapped[list[Module]] = relationship(back_populates="model")
+
+
+class ModelProviderKey(Base):
+    __tablename__ = "model_provider_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(160))
+    provider: Mapped[str] = mapped_column(String(80), default="openai", index=True)
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    token_prefix: Mapped[str] = mapped_column(String(24), index=True)
+    status: Mapped[str] = mapped_column(String(40), default=ModelProviderKeyStatus.active.value)
+    created_by: Mapped[str] = mapped_column(String(80), default="admin")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class OutputPolicy(Base):
+    __tablename__ = "output_policies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(160))
+    quality_tier: Mapped[str] = mapped_column(String(40), default="standard")
+    primary_model_id: Mapped[int | None] = mapped_column(ForeignKey("model_configs.id"), nullable=True)
+    fallback_model_id: Mapped[int | None] = mapped_column(ForeignKey("model_configs.id"), nullable=True)
+    max_output_tokens: Mapped[int] = mapped_column(Integer, default=600)
+    temperature_x100: Mapped[int] = mapped_column(Integer, default=70)
+    response_format: Mapped[str] = mapped_column(String(40), default="json")
+    safety_rules: Mapped[str] = mapped_column(Text, default="")
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    primary_model: Mapped[ModelConfig | None] = relationship(foreign_keys=[primary_model_id])
+    fallback_model: Mapped[ModelConfig | None] = relationship(foreign_keys=[fallback_model_id])
 
 
 class Module(Base):

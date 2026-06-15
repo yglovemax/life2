@@ -21,9 +21,12 @@ from app.models import (
     KnowledgeChunk,
     KnowledgeSource,
     ModelConfig,
+    ModelProviderKey,
+    ModelProviderKeyStatus,
     Module,
     ModuleStatus,
     ModuleVersion,
+    OutputPolicy,
     Page,
     PromptTemplate,
     utc_now,
@@ -127,19 +130,22 @@ def list_pages(session: Session) -> list[dict]:
 
 def list_models(session: Session) -> list[dict]:
     models = session.scalars(select(ModelConfig).order_by(ModelConfig.id)).all()
-    return [
-        {
-            "id": model.id,
-            "provider": model.provider,
-            "name": model.name,
-            "display_name": model.display_name,
-            "quality_tier": model.quality_tier,
-            "input_cost_per_1m": model.input_cost_per_1m,
-            "output_cost_per_1m": model.output_cost_per_1m,
-            "is_active": model.is_active,
-        }
-        for model in models
-    ]
+    return [serialize_model_config(model) for model in models]
+
+
+def serialize_model_config(model: ModelConfig | None) -> dict | None:
+    if model is None:
+        return None
+    return {
+        "id": model.id,
+        "provider": model.provider,
+        "name": model.name,
+        "display_name": model.display_name,
+        "quality_tier": model.quality_tier,
+        "input_cost_per_1m": model.input_cost_per_1m,
+        "output_cost_per_1m": model.output_cost_per_1m,
+        "is_active": model.is_active,
+    }
 
 
 def list_test_users() -> list[dict]:
@@ -1033,6 +1039,241 @@ def is_expired(value) -> bool:
     if getattr(value, "tzinfo", None) is None:
         now = now.replace(tzinfo=None)
     return value <= now
+
+
+def create_model_provider_key(session: Session, payload: dict) -> dict:
+    api_key = (payload.get("api_key") or "").strip()
+    if not api_key:
+        api_key = f"mk_{secrets.token_urlsafe(32)}"
+    key = ModelProviderKey(
+        name=(payload.get("name") or "未命名模型 Key").strip(),
+        provider=(payload.get("provider") or "openai").strip(),
+        token_hash=hash_token(api_key),
+        token_prefix=api_key[:12],
+        created_by=payload.get("operator") or "admin",
+        status=ModelProviderKeyStatus.active.value,
+    )
+    session.add(key)
+    session.commit()
+    session.refresh(key)
+    record_audit_event(
+        session,
+        event_type="model_provider_key_created",
+        actor=key.created_by,
+        target_type="model_provider_key",
+        target_id=str(key.id),
+        severity="info",
+        details={"name": key.name, "provider": key.provider},
+    )
+    return {"api_key": api_key, "key": serialize_model_provider_key(key)}
+
+
+def list_model_provider_keys(session: Session) -> list[dict]:
+    keys = session.scalars(select(ModelProviderKey).order_by(ModelProviderKey.created_at.desc(), ModelProviderKey.id.desc())).all()
+    return [serialize_model_provider_key(key) for key in keys]
+
+
+def revoke_model_provider_key(session: Session, key_id: int, payload: dict) -> dict | None:
+    key = session.get(ModelProviderKey, key_id)
+    if key is None:
+        return None
+    key.status = ModelProviderKeyStatus.revoked.value
+    key.revoked_at = utc_now()
+    session.commit()
+    session.refresh(key)
+    record_audit_event(
+        session,
+        event_type="model_provider_key_revoked",
+        actor=payload.get("operator") or "admin",
+        target_type="model_provider_key",
+        target_id=str(key.id),
+        severity="warning",
+        details={"name": key.name, "provider": key.provider},
+    )
+    return serialize_model_provider_key(key)
+
+
+def serialize_model_provider_key(key: ModelProviderKey) -> dict:
+    return {
+        "id": key.id,
+        "name": key.name,
+        "provider": key.provider,
+        "token_prefix": key.token_prefix,
+        "status": key.status,
+        "created_by": key.created_by,
+        "created_at": key.created_at.isoformat(),
+        "last_used_at": key.last_used_at.isoformat() if key.last_used_at else None,
+        "revoked_at": key.revoked_at.isoformat() if key.revoked_at else None,
+    }
+
+
+def create_output_policy(session: Session, payload: dict) -> dict:
+    policy = OutputPolicy(
+        name=(payload.get("name") or "默认输出策略").strip(),
+        quality_tier=(payload.get("quality_tier") or "standard").strip(),
+        primary_model_id=nullable_int(payload.get("primary_model_id")),
+        fallback_model_id=nullable_int(payload.get("fallback_model_id")),
+        max_output_tokens=clamp_int(payload.get("max_output_tokens"), 120, 4000, 600),
+        temperature_x100=clamp_int(payload.get("temperature_x100"), 0, 200, 70),
+        response_format=(payload.get("response_format") or "json").strip(),
+        safety_rules=payload.get("safety_rules") or "",
+        is_default=bool(payload.get("is_default")),
+    )
+    if policy.is_default:
+        clear_default_output_policies(session)
+    session.add(policy)
+    session.commit()
+    session.refresh(policy)
+    return serialize_output_policy(policy)
+
+
+def update_output_policy(session: Session, policy_id: int, payload: dict) -> dict | None:
+    policy = session.scalar(
+        select(OutputPolicy)
+        .where(OutputPolicy.id == policy_id)
+        .options(joinedload(OutputPolicy.primary_model), joinedload(OutputPolicy.fallback_model))
+    )
+    if policy is None:
+        return None
+    if "name" in payload:
+        policy.name = (payload.get("name") or policy.name).strip()
+    if "quality_tier" in payload:
+        policy.quality_tier = (payload.get("quality_tier") or policy.quality_tier).strip()
+    if "primary_model_id" in payload:
+        policy.primary_model_id = nullable_int(payload.get("primary_model_id"))
+    if "fallback_model_id" in payload:
+        policy.fallback_model_id = nullable_int(payload.get("fallback_model_id"))
+    if "max_output_tokens" in payload:
+        policy.max_output_tokens = clamp_int(payload.get("max_output_tokens"), 120, 4000, policy.max_output_tokens)
+    if "temperature_x100" in payload:
+        policy.temperature_x100 = clamp_int(payload.get("temperature_x100"), 0, 200, policy.temperature_x100)
+    if "response_format" in payload:
+        policy.response_format = (payload.get("response_format") or policy.response_format).strip()
+    if "safety_rules" in payload:
+        policy.safety_rules = payload.get("safety_rules") or ""
+    if "is_default" in payload:
+        policy.is_default = bool(payload.get("is_default"))
+        if policy.is_default:
+            clear_default_output_policies(session, except_id=policy.id)
+    session.commit()
+    session.refresh(policy)
+    return serialize_output_policy(policy)
+
+
+def list_output_policies(session: Session) -> list[dict]:
+    policies = session.scalars(
+        select(OutputPolicy)
+        .options(joinedload(OutputPolicy.primary_model), joinedload(OutputPolicy.fallback_model))
+        .order_by(OutputPolicy.is_default.desc(), OutputPolicy.created_at.desc(), OutputPolicy.id.desc())
+    ).all()
+    return [serialize_output_policy(policy) for policy in policies]
+
+
+def clear_default_output_policies(session: Session, except_id: int | None = None) -> None:
+    policies = session.scalars(select(OutputPolicy).where(OutputPolicy.is_default.is_(True))).all()
+    for policy in policies:
+        if except_id is None or policy.id != except_id:
+            policy.is_default = False
+
+
+def serialize_output_policy(policy: OutputPolicy) -> dict:
+    return {
+        "id": policy.id,
+        "name": policy.name,
+        "quality_tier": policy.quality_tier,
+        "primary_model_id": policy.primary_model_id,
+        "fallback_model_id": policy.fallback_model_id,
+        "primary_model": serialize_model_config(policy.primary_model),
+        "fallback_model": serialize_model_config(policy.fallback_model),
+        "max_output_tokens": policy.max_output_tokens,
+        "temperature_x100": policy.temperature_x100,
+        "response_format": policy.response_format,
+        "safety_rules": policy.safety_rules,
+        "is_default": policy.is_default,
+        "created_at": policy.created_at.isoformat(),
+        "updated_at": policy.updated_at.isoformat(),
+    }
+
+
+def preview_model_route(session: Session, payload: dict) -> dict:
+    policy = resolve_output_policy(session, nullable_int(payload.get("policy_id")))
+    module = session.get(Module, nullable_int(payload.get("module_id")) or 0)
+    selected_model = resolve_primary_model(session, policy, payload)
+    fallback_model = resolve_fallback_model(session, policy, selected_model)
+    return {
+        "module": {
+            "id": module.id,
+            "name": module.name,
+            "slug": module.slug,
+        } if module else None,
+        "policy": serialize_output_policy(policy) if policy else default_policy_payload(payload),
+        "selected_model": serialize_model_config(selected_model),
+        "fallback_model": serialize_model_config(fallback_model),
+        "orchestration": {
+            "quality_tier": policy.quality_tier if policy else payload.get("quality_tier") or "standard",
+            "max_output_tokens": policy.max_output_tokens if policy else clamp_int(payload.get("max_output_tokens"), 120, 4000, 600),
+            "temperature_x100": policy.temperature_x100 if policy else clamp_int(payload.get("temperature_x100"), 0, 200, 70),
+            "response_format": policy.response_format if policy else payload.get("response_format") or "json",
+            "safety_rules": policy.safety_rules if policy else payload.get("safety_rules") or "保持安全边界，避免医疗、法律、投资承诺。",
+        },
+    }
+
+
+def resolve_output_policy(session: Session, policy_id: int | None) -> OutputPolicy | None:
+    statement = select(OutputPolicy).options(joinedload(OutputPolicy.primary_model), joinedload(OutputPolicy.fallback_model))
+    if policy_id:
+        return session.scalar(statement.where(OutputPolicy.id == policy_id))
+    return session.scalar(statement.where(OutputPolicy.is_default.is_(True)).order_by(OutputPolicy.created_at.desc(), OutputPolicy.id.desc()))
+
+
+def resolve_primary_model(session: Session, policy: OutputPolicy | None, payload: dict) -> ModelConfig | None:
+    if policy and policy.primary_model and policy.primary_model.is_active:
+        return policy.primary_model
+    quality_tier = (payload.get("quality_tier") or (policy.quality_tier if policy else "standard")).strip()
+    model = session.scalar(
+        select(ModelConfig)
+        .where(ModelConfig.is_active.is_(True), ModelConfig.quality_tier == quality_tier)
+        .order_by(ModelConfig.input_cost_per_1m.asc(), ModelConfig.output_cost_per_1m.asc())
+    )
+    if model is not None:
+        return model
+    return session.scalar(select(ModelConfig).where(ModelConfig.is_active.is_(True)).order_by(ModelConfig.id))
+
+
+def resolve_fallback_model(session: Session, policy: OutputPolicy | None, selected_model: ModelConfig | None) -> ModelConfig | None:
+    if policy and policy.fallback_model and policy.fallback_model.is_active:
+        return policy.fallback_model
+    statement = select(ModelConfig).where(ModelConfig.is_active.is_(True)).order_by(ModelConfig.output_cost_per_1m.asc(), ModelConfig.id.asc())
+    if selected_model is not None:
+        statement = statement.where(ModelConfig.id != selected_model.id)
+    return session.scalar(statement)
+
+
+def default_policy_payload(payload: dict) -> dict:
+    return {
+        "id": None,
+        "name": "临时路由策略",
+        "quality_tier": payload.get("quality_tier") or "standard",
+        "primary_model": None,
+        "fallback_model": None,
+        "max_output_tokens": clamp_int(payload.get("max_output_tokens"), 120, 4000, 600),
+        "temperature_x100": clamp_int(payload.get("temperature_x100"), 0, 200, 70),
+        "response_format": payload.get("response_format") or "json",
+        "safety_rules": payload.get("safety_rules") or "保持安全边界，避免医疗、法律、投资承诺。",
+        "is_default": False,
+    }
+
+
+def nullable_int(value) -> int | None:
+    if value in (None, ""):
+        return None
+    return int(value)
+
+
+def clamp_int(value, minimum: int, maximum: int, fallback: int) -> int:
+    if value in (None, ""):
+        return fallback
+    return max(minimum, min(maximum, int(value)))
 
 
 def create_app_api_key(session: Session, payload: dict) -> dict:

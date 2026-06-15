@@ -491,6 +491,81 @@ def test_issue_can_be_listed_filtered_and_resolved():
     assert any(item["id"] == created["id"] for item in resolved_list)
 
 
+def test_model_provider_key_is_created_once_and_list_is_redacted():
+    api_key = f"sk-test-router-secret-{uuid4().hex}"
+    response = client.post(
+        "/api/model-provider-keys",
+        headers=admin_headers(),
+        json={
+            "name": "OpenAI Production",
+            "provider": "openai",
+            "api_key": api_key,
+        },
+    )
+
+    assert response.status_code == 200
+    created = response.json()
+    assert created["api_key"] == api_key
+    assert created["key"]["name"] == "OpenAI Production"
+    assert created["key"]["status"] == "active"
+    assert created["key"]["token_prefix"].startswith("sk-t")
+
+    list_response = client.get("/api/model-provider-keys", headers=admin_headers())
+    assert list_response.status_code == 200
+    items = list_response.json()["items"]
+    assert any(item["id"] == created["key"]["id"] for item in items)
+    assert api_key not in str(items)
+    assert all("token_hash" not in item for item in items)
+
+
+def test_output_policy_routes_to_primary_model_and_exposes_orchestration_preview():
+    models = client.get("/api/models").json()["items"]
+    primary = models[0]
+    fallback = models[-1]
+
+    create_response = client.post(
+        "/api/output-policies",
+        headers=admin_headers(),
+        json={
+            "name": "深度解读高质量",
+            "quality_tier": "premium",
+            "primary_model_id": primary["id"],
+            "fallback_model_id": fallback["id"],
+            "max_output_tokens": 680,
+            "temperature_x100": 65,
+            "response_format": "json",
+            "safety_rules": "避免医疗、法律、投资承诺。",
+            "is_default": True,
+        },
+    )
+
+    assert create_response.status_code == 200
+    policy = create_response.json()
+    assert policy["name"] == "深度解读高质量"
+    assert policy["max_output_tokens"] == 680
+    assert policy["primary_model"]["id"] == primary["id"]
+    assert policy["fallback_model"]["id"] == fallback["id"]
+
+    preview_response = client.post(
+        "/api/model-router/preview",
+        json={
+            "module_id": client.get("/api/modules").json()["items"][0]["id"],
+            "policy_id": policy["id"],
+            "input_payload": {"topic": "relationship", "risk_level": "normal"},
+        },
+    )
+
+    assert preview_response.status_code == 200
+    preview = preview_response.json()
+    assert preview["selected_model"]["id"] == primary["id"]
+    assert preview["fallback_model"]["id"] == fallback["id"]
+    assert preview["policy"]["id"] == policy["id"]
+    assert preview["orchestration"]["max_output_tokens"] == 680
+    assert preview["orchestration"]["temperature_x100"] == 65
+    assert preview["orchestration"]["response_format"] == "json"
+    assert "避免医疗" in preview["orchestration"]["safety_rules"]
+
+
 def test_app_module_api_requires_token():
     response = client.post(
         "/api/app/modules/birth-basic-chart-info/render",

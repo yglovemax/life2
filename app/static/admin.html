@@ -40,6 +40,7 @@
         <button data-view="knowledge">知识库</button>
         <button data-view="cost-center">成本中心</button>
         <button data-view="release-center">发布中心</button>
+        <button data-view="model-router">模型路由</button>
         <button data-view="app-api">App 接口</button>
         <button data-view="security">安全审计</button>
       </nav>
@@ -388,6 +389,119 @@
           </div>
           <div class="detail-body">
             <div id="releaseVersionList" class="trace-list"></div>
+          </div>
+        </section>
+      </section>
+
+      <section class="layout hidden" id="modelRouterView">
+        <section class="panel module-center">
+          <div class="panel-head">
+            <div>
+              <p>Model Router</p>
+              <h2>模型路由</h2>
+            </div>
+            <button class="secondary compact" id="refreshModelRouterButton">刷新</button>
+          </div>
+          <div class="detail-body">
+            <div id="modelRouterNotice"></div>
+            <section>
+              <h3>模型供应商 Key</h3>
+              <div class="form-grid">
+                <label>Key 名称
+                  <input id="modelKeyName" placeholder="例如：OpenAI Production" />
+                </label>
+                <label>供应商
+                  <input id="modelKeyProvider" value="openai" />
+                </label>
+                <label class="wide">API Key
+                  <input id="modelKeyValue" placeholder="只会显示一次，数据库仅保存哈希" />
+                </label>
+              </div>
+              <div class="actions">
+                <button class="primary" id="createModelKeyButton">保存模型 Key</button>
+              </div>
+              <div id="createdModelKeyBox"></div>
+            </section>
+
+            <section class="section">
+              <h3>输出策略</h3>
+              <div class="form-grid">
+                <label>策略名称
+                  <input id="policyName" placeholder="例如：深度解读高质量" />
+                </label>
+                <label>质量层级
+                  <select id="policyQuality">
+                    <option value="standard">标准</option>
+                    <option value="premium">高质量</option>
+                    <option value="economy">低成本</option>
+                  </select>
+                </label>
+                <label>主模型
+                  <select id="policyPrimaryModel"></select>
+                </label>
+                <label>备用模型
+                  <select id="policyFallbackModel"></select>
+                </label>
+                <label>最大输出 Token
+                  <input id="policyMaxTokens" type="number" min="120" max="4000" value="680" />
+                </label>
+                <label>温度 x100
+                  <input id="policyTemperature" type="number" min="0" max="200" value="65" />
+                </label>
+                <label>返回格式
+                  <select id="policyResponseFormat">
+                    <option value="json">JSON</option>
+                    <option value="text">Text</option>
+                  </select>
+                </label>
+                <label>默认策略
+                  <select id="policyIsDefault">
+                    <option value="true">设为默认</option>
+                    <option value="false">不设默认</option>
+                  </select>
+                </label>
+                <label class="wide">安全与输出边界
+                  <textarea id="policySafetyRules">避免医疗、法律、投资承诺。输出必须遵守字段契约，字数不超过策略限制。</textarea>
+                </label>
+              </div>
+              <div class="actions">
+                <button class="primary" id="createOutputPolicyButton">保存输出策略</button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel detail">
+          <div class="panel-head">
+            <div>
+              <p>Routing Preview</p>
+              <h2>路由预览</h2>
+            </div>
+          </div>
+          <div class="detail-body">
+            <section>
+              <h3>预览配置</h3>
+              <div class="form-grid">
+                <label>模块
+                  <select id="routerPreviewModule"></select>
+                </label>
+                <label>输出策略
+                  <select id="routerPreviewPolicy"></select>
+                </label>
+              </div>
+              <div class="actions">
+                <button class="secondary" id="previewRouterButton">预览路由</button>
+              </div>
+              <div id="routerPreviewResult" class="trace-list"><p class="empty">还没有预览路由。</p></div>
+            </section>
+            <section class="section">
+              <h3>输出策略列表</h3>
+              <div class="trace-list" id="outputPolicyList"></div>
+            </section>
+            <section class="section">
+              <h3>模型 Key 列表</h3>
+              <div class="trace-list" id="modelProviderKeyList"></div>
+            </section>
           </div>
         </section>
       </section>

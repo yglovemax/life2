@@ -23,6 +23,11 @@ admin / admin123
 - `POST /api/security/app-keys`
 - `POST /api/security/app-keys/{key_id}/revoke`
 - `GET /api/security/audit-events`
+- `GET /api/model-provider-keys`
+- `POST /api/model-provider-keys`
+- `POST /api/model-provider-keys/{key_id}/revoke`
+- `POST /api/output-policies`
+- `PUT /api/output-policies/{policy_id}`
 
 ## App Key
 
@@ -38,6 +43,21 @@ admin / admin123
 - 创建时间、最近使用时间、撤销时间
 
 不要把明文 token 写进代码库。移动端、Web 或服务端应通过自己的安全配置系统保存。
+
+## 模型供应商 Key
+
+后台「模型路由」页面可以保存模型供应商 Key。
+
+创建后平台只返回一次明文 API Key，数据库只保存：
+
+- key 哈希
+- key 前缀
+- 供应商
+- key 名称
+- 状态
+- 创建时间、最近使用时间、撤销时间
+
+当前阶段模型 Key 只用于配置和路由预览，还不会向外部大模型供应商发起真实请求。
 
 ## 默认开发 Token
 
@@ -87,6 +107,8 @@ X-Nexa-Api-Key: <token>
 - `app_auth_failed`
 - `app_module_render`
 - `app_page_render`
+- `model_provider_key_created`
+- `model_provider_key_revoked`
 
 审计事件不会保存完整 token，只保存必要的上下文，例如接口路径、request id、trace id、模块或页面标识。
 
@@ -101,6 +123,13 @@ GET /api/security/app-keys
 POST /api/security/app-keys
 POST /api/security/app-keys/{key_id}/revoke
 GET /api/security/audit-events
+GET /api/model-provider-keys
+POST /api/model-provider-keys
+POST /api/model-provider-keys/{key_id}/revoke
+GET /api/output-policies
+POST /api/output-policies
+PUT /api/output-policies/{policy_id}
+POST /api/model-router/preview
 ```
 
 创建 key 示例：
