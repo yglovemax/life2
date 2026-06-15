@@ -36,6 +36,7 @@
       <nav>
         <button class="active" data-view="modules">模块中心</button>
         <button data-view="test-center">测试中心</button>
+        <button data-view="issues">问题追踪</button>
         <button data-view="knowledge">知识库</button>
         <button data-view="cost-center">成本中心</button>
         <button data-view="release-center">发布中心</button>
@@ -232,6 +233,62 @@
             <section class="section">
               <h3>知识片段</h3>
               <div class="trace-list" id="knowledgeChunks"></div>
+            </section>
+          </div>
+        </section>
+      </section>
+
+      <section class="layout hidden" id="issuesView">
+        <section class="panel module-center">
+          <div class="panel-head">
+            <div>
+              <p>Issue Tracker</p>
+              <h2>问题追踪</h2>
+            </div>
+            <button class="secondary compact" id="refreshIssuesButton">刷新</button>
+          </div>
+          <div class="detail-body">
+            <div id="issueNotice"></div>
+            <section>
+              <h3>筛选</h3>
+              <div class="form-grid">
+                <label>状态
+                  <select id="issueStatusFilter">
+                    <option value="">全部状态</option>
+                    <option value="open">待处理</option>
+                    <option value="in_progress">处理中</option>
+                    <option value="resolved">已解决</option>
+                  </select>
+                </label>
+                <label>负责人
+                  <input id="issueOwnerFilter" placeholder="例如：Prompt / QA / 产品" />
+                </label>
+              </div>
+            </section>
+            <section class="section">
+              <h3>问题列表</h3>
+              <div id="issueList" class="trace-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel detail">
+          <div class="panel-head">
+            <div>
+              <p>Overview</p>
+              <h2>处理看板</h2>
+            </div>
+          </div>
+          <div class="detail-body">
+            <section>
+              <h3>状态统计</h3>
+              <div class="insight-grid" id="issueSummaryCards"></div>
+            </section>
+            <section class="section">
+              <h3>协作规则</h3>
+              <div class="trace-card">
+                <p>发现内容、字段、Fallback、模型或算法数据问题后，先绑定到模块，再指定负责人推进到解决。解决后保留备注，方便复盘一次真实页面问题的处理链路。</p>
+              </div>
             </section>
           </div>
         </section>

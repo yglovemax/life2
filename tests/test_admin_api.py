@@ -429,6 +429,68 @@ def test_publish_and_rollback_create_module_versions_and_update_status():
     assert any(item["status"] == "gray" for item in versions)
 
 
+def test_issue_can_be_created_for_module_and_updates_open_issue_count():
+    module = client.get("/api/modules").json()["items"][0]
+
+    response = client.post(
+        f"/api/modules/{module['id']}/issues",
+        json={
+            "title": "字段 summary 内容太空",
+            "issue_type": "content_quality",
+            "owner": "Prompt",
+            "notes": "测试样本里缺少具体建议。",
+        },
+    )
+
+    assert response.status_code == 200
+    issue = response.json()
+    assert issue["module_id"] == module["id"]
+    assert issue["title"] == "字段 summary 内容太空"
+    assert issue["status"] == "open"
+    assert issue["owner"] == "Prompt"
+
+    detail = client.get(f"/api/modules/{module['id']}").json()
+    assert any(item["id"] == issue["id"] for item in detail["issues"])
+
+    rows = client.get("/api/modules").json()["items"]
+    updated_module = next(item for item in rows if item["id"] == module["id"])
+    assert updated_module["open_issues"] >= 1
+
+
+def test_issue_can_be_listed_filtered_and_resolved():
+    module = client.get("/api/modules").json()["items"][0]
+    created = client.post(
+        f"/api/modules/{module['id']}/issues",
+        json={
+            "title": "Fallback 文案需要调整",
+            "issue_type": "fallback",
+            "owner": "QA",
+            "notes": "备用内容太泛。",
+        },
+    ).json()
+
+    open_list = client.get("/api/issues?status=open&owner=QA").json()["items"]
+    assert any(item["id"] == created["id"] for item in open_list)
+
+    response = client.put(
+        f"/api/issues/{created['id']}",
+        json={
+            "status": "resolved",
+            "owner": "Prompt",
+            "notes": "已补充具体建议并通过测试。",
+        },
+    )
+
+    assert response.status_code == 200
+    resolved = response.json()
+    assert resolved["status"] == "resolved"
+    assert resolved["owner"] == "Prompt"
+    assert resolved["notes"] == "已补充具体建议并通过测试。"
+
+    resolved_list = client.get("/api/issues?status=resolved").json()["items"]
+    assert any(item["id"] == created["id"] for item in resolved_list)
+
+
 def test_app_module_api_requires_token():
     response = client.post(
         "/api/app/modules/birth-basic-chart-info/render",

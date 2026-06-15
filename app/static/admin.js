@@ -15,6 +15,8 @@ let latestAppApiResult = null;
 let securityStatus = null;
 let appKeys = [];
 let auditEvents = [];
+let issueItems = [];
+let issueSummaryItems = [];
 let createdAppToken = "";
 let adminToken = localStorage.getItem("nexa_admin_token") || "";
 let adminUser = null;
@@ -51,6 +53,15 @@ function statusLabel(status) {
     live: "已上线",
     rolled_back: "已回滚",
     disabled: "已停用",
+  };
+  return labels[status] || status;
+}
+
+function issueStatusLabel(status) {
+  const labels = {
+    open: "待处理",
+    in_progress: "处理中",
+    resolved: "已解决",
   };
   return labels[status] || status;
 }
@@ -329,6 +340,8 @@ function renderEditor(detail, isCreate = false) {
       <div class="field-editor" id="fieldEditor">${draftFields.map(fieldInput).join("")}</div>
     </section>
 
+    ${detail.id ? moduleIssueSection(detail) : ""}
+
     ${
       detail.id
         ? `<section class="section">
@@ -338,6 +351,39 @@ function renderEditor(detail, isCreate = false) {
         : ""
     }
   </div>`;
+}
+
+function moduleIssueSection(detail) {
+  return `<section class="section">
+    <div class="panel-head inline-head">
+      <div><p>Issue Tracker</p><h3>当前待处理问题</h3></div>
+      <button class="secondary compact" onclick="createModuleIssue()">记录问题</button>
+    </div>
+    <div id="issueCreateNotice"></div>
+    <div class="form-grid">
+      <label>问题标题
+        <input id="moduleIssueTitle" placeholder="例如：summary 内容太空 / 字段缺失" />
+      </label>
+      <label>问题类型
+        <select id="moduleIssueType">
+          <option value="content_quality">内容质量</option>
+          <option value="field_contract">字段契约</option>
+          <option value="fallback">Fallback</option>
+          <option value="model_error">模型异常</option>
+          <option value="algorithm_data">算法数据</option>
+        </select>
+      </label>
+      <label>负责人
+        <input id="moduleIssueOwner" placeholder="Prompt / QA / 产品 / 后端" />
+      </label>
+      <label class="wide">问题备注
+        <textarea id="moduleIssueNotes" placeholder="记录复现样本、期望结果和当前问题。"></textarea>
+      </label>
+    </div>
+    <div class="trace-list issue-list">
+      ${(detail.issues || []).length ? detail.issues.map((issue) => issueCard(issue, "module")).join("") : '<p class="empty">暂无待处理问题。</p>'}
+    </div>
+  </section>`;
 }
 
 function statusOptions(selected) {
@@ -509,12 +555,14 @@ function showView(view) {
   });
   document.querySelector("#moduleView").classList.toggle("hidden", view !== "modules");
   document.querySelector("#testCenterView").classList.toggle("hidden", view !== "test-center");
+  document.querySelector("#issuesView").classList.toggle("hidden", view !== "issues");
   document.querySelector("#knowledgeView").classList.toggle("hidden", view !== "knowledge");
   document.querySelector("#costCenterView").classList.toggle("hidden", view !== "cost-center");
   document.querySelector("#releaseCenterView").classList.toggle("hidden", view !== "release-center");
   document.querySelector("#appApiView").classList.toggle("hidden", view !== "app-api");
   document.querySelector("#securityView").classList.toggle("hidden", view !== "security");
   if (view === "test-center") renderTestCenter();
+  if (view === "issues") renderIssueWorkspace();
   if (view === "knowledge") renderKnowledgeWorkspace();
   if (view === "cost-center") renderCostCenter();
   if (view === "release-center") renderReleaseCenter();
@@ -653,6 +701,135 @@ async function scoreTrace(traceId) {
   latestTestResults = latestTestResults.map((trace) => (trace.id === saved.id ? saved : trace));
   renderTestResults();
   await loadRecentTraces();
+}
+
+function setupIssueActions() {
+  document.querySelector("#refreshIssuesButton").onclick = renderIssueWorkspace;
+  document.querySelector("#issueStatusFilter").onchange = renderIssueWorkspace;
+  document.querySelector("#issueOwnerFilter").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") renderIssueWorkspace();
+  });
+}
+
+async function renderIssueWorkspace() {
+  await loadIssueData();
+  renderIssueSummary();
+  renderIssueList();
+}
+
+async function loadIssueData() {
+  const params = new URLSearchParams();
+  const status = document.querySelector("#issueStatusFilter").value;
+  const owner = document.querySelector("#issueOwnerFilter").value.trim();
+  if (status) params.set("status", status);
+  if (owner) params.set("owner", owner);
+  const query = params.toString();
+  const [summaryData, issueData] = await Promise.all([
+    getJson("/api/issues"),
+    getJson(`/api/issues${query ? `?${query}` : ""}`),
+  ]);
+  issueSummaryItems = summaryData.items;
+  issueItems = issueData.items;
+}
+
+function renderIssueSummary() {
+  const counts = {
+    open: issueSummaryItems.filter((issue) => issue.status === "open").length,
+    in_progress: issueSummaryItems.filter((issue) => issue.status === "in_progress").length,
+    resolved: issueSummaryItems.filter((issue) => issue.status === "resolved").length,
+  };
+  const cards = [
+    ["待处理", counts.open],
+    ["处理中", counts.in_progress],
+    ["已解决", counts.resolved],
+    ["全部问题", issueSummaryItems.length],
+  ];
+  document.querySelector("#issueSummaryCards").innerHTML = cards
+    .map(([label, value]) => `<article class="mini-card"><span>${label}</span><strong>${value}</strong></article>`)
+    .join("");
+}
+
+function renderIssueList() {
+  document.querySelector("#issueList").innerHTML = issueItems.length
+    ? issueItems.map((issue) => issueCard(issue, "center")).join("")
+    : '<p class="empty">当前筛选下没有问题。</p>';
+}
+
+function issueCard(issue, context) {
+  const inputId = (key) => `issue_${key}_${context}_${issue.id}`;
+  return `<article class="trace-card issue-card">
+    <span>#${issue.id} · ${escapeHtml(issue.page_name || "未分组")} / ${escapeHtml(issue.module_name || `模块 ${issue.module_id}`)} · ${issueStatusLabel(issue.status)}</span>
+    <p><strong>${escapeHtml(issue.title)}</strong></p>
+    <div class="form-grid compact-grid">
+      <label>状态
+        <select id="${inputId("status")}">
+          ${["open", "in_progress", "resolved"].map((status) => `<option value="${status}" ${issue.status === status ? "selected" : ""}>${issueStatusLabel(status)}</option>`).join("")}
+        </select>
+      </label>
+      <label>负责人
+        <input id="${inputId("owner")}" value="${escapeHtml(issue.owner)}" />
+      </label>
+      <label class="wide">备注
+        <textarea id="${inputId("notes")}">${escapeHtml(issue.notes || "")}</textarea>
+      </label>
+    </div>
+    <div class="actions">
+      <button class="secondary compact" onclick="updateIssue(${issue.id}, '${context}')">保存进度</button>
+    </div>
+  </article>`;
+}
+
+async function createModuleIssue() {
+  const notice = document.querySelector("#issueCreateNotice");
+  try {
+    if (!currentDetail?.id) throw new Error("请先选择一个模块");
+    const payload = {
+      title: document.querySelector("#moduleIssueTitle").value.trim(),
+      issue_type: document.querySelector("#moduleIssueType").value,
+      owner: document.querySelector("#moduleIssueOwner").value.trim() || "未分配",
+      notes: document.querySelector("#moduleIssueNotes").value,
+    };
+    if (!payload.title) throw new Error("问题标题不能为空");
+    const issue = await getJson(`/api/modules/${currentDetail.id}/issues`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    document.querySelector("#moduleIssueTitle").value = "";
+    document.querySelector("#moduleIssueOwner").value = "";
+    document.querySelector("#moduleIssueNotes").value = "";
+    await loadModules();
+    await selectModule(currentDetail.id);
+    document.querySelector("#issueCreateNotice").innerHTML = `<div class="notice">问题 #${issue.id} 已记录</div>`;
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function updateIssue(issueId, context) {
+  const notice = document.querySelector(context === "center" ? "#issueNotice" : "#issueCreateNotice");
+  const valueFor = (key) => document.querySelector(`#issue_${key}_${context}_${issueId}`).value;
+  try {
+    const saved = await getJson(`/api/issues/${issueId}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        status: valueFor("status"),
+        owner: valueFor("owner").trim() || "未分配",
+        notes: valueFor("notes"),
+      }),
+    });
+    const message = `<div class="notice">问题 #${saved.id} 已更新为 ${issueStatusLabel(saved.status)}</div>`;
+    await loadModules();
+    if (currentDetail?.id === saved.module_id) {
+      await selectModule(saved.module_id);
+    }
+    if (context === "center") {
+      await renderIssueWorkspace();
+    }
+    const refreshedNotice = document.querySelector(context === "center" ? "#issueNotice" : "#issueCreateNotice");
+    if (refreshedNotice) refreshedNotice.innerHTML = message;
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
 }
 
 function setupKnowledgeActions() {
@@ -1161,6 +1338,7 @@ async function initializeConsole() {
   }
   consoleInitialized = true;
   setupNavigation();
+  setupIssueActions();
   setupKnowledgeActions();
   setupCostActions();
   setupReleaseActions();

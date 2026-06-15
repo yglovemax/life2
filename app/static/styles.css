@@ -315,6 +315,11 @@ tbody tr.selected {
   gap: 14px;
 }
 
+.compact-grid {
+  gap: 10px;
+  margin-top: 10px;
+}
+
 .wide {
   grid-column: 1 / -1;
 }
@@ -594,6 +599,10 @@ label {
 .alert-card {
   border-color: rgba(167, 71, 63, 0.32);
   background: #fff9f6;
+}
+
+.issue-card {
+  background: #fbfffc;
 }
 
 .version-card {

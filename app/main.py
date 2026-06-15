@@ -13,6 +13,7 @@ from app.services import (
     authenticate_admin_token,
     authenticate_app_token,
     cost_summary,
+    create_issue,
     create_knowledge_source,
     create_app_api_key,
     create_manual_knowledge_entry,
@@ -21,6 +22,7 @@ from app.services import (
     list_app_api_keys,
     list_audit_events,
     list_fallback_alerts,
+    list_issues,
     list_knowledge_chunks,
     list_knowledge_sources,
     list_call_traces,
@@ -45,6 +47,7 @@ from app.services import (
     security_status,
     serialize_admin_user,
     update_module,
+    update_issue,
 )
 
 
@@ -303,6 +306,27 @@ def call_trace_score(trace_id: int, payload: dict, session: Session = Depends(ge
     if trace is None:
         raise HTTPException(status_code=404, detail="call trace not found")
     return trace
+
+
+@app.get("/api/issues")
+def issues(status: str | None = None, owner: str | None = None, module_id: int | None = None, session: Session = Depends(get_session)) -> dict:
+    return {"items": list_issues(session, status=status, owner=owner, module_id=module_id)}
+
+
+@app.post("/api/modules/{module_id}/issues")
+def module_issue_create(module_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
+    issue = create_issue(session, module_id, payload)
+    if issue is None:
+        raise HTTPException(status_code=404, detail="module not found")
+    return issue
+
+
+@app.put("/api/issues/{issue_id}")
+def issue_update(issue_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
+    issue = update_issue(session, issue_id, payload)
+    if issue is None:
+        raise HTTPException(status_code=404, detail="issue not found")
+    return issue
 
 
 @app.get("/api/costs/summary")

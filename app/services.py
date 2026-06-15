@@ -16,6 +16,8 @@ from app.models import (
     AuditEvent,
     CallTrace,
     FieldContract,
+    Issue,
+    IssueStatus,
     KnowledgeChunk,
     KnowledgeSource,
     ModelConfig,
@@ -344,15 +346,8 @@ def get_module_detail(session: Session, module_id: int) -> dict | None:
         "recent_calls": [serialize_call(call) for call in calls],
         "versions": [serialize_version(version) for version in sorted(module.versions, key=lambda item: (item.created_at, item.id), reverse=True)],
         "issues": [
-            {
-                "id": issue.id,
-                "title": issue.title,
-                "issue_type": issue.issue_type,
-                "owner": issue.owner,
-                "status": issue.status,
-                "created_at": issue.created_at.isoformat(),
-            }
-            for issue in module.issues
+            serialize_issue(issue, module=module)
+            for issue in sorted(module.issues, key=lambda item: (item.status == IssueStatus.resolved.value, item.created_at), reverse=False)
         ],
     }
 
@@ -599,6 +594,80 @@ def score_call_trace(session: Session, trace_id: int, payload: dict) -> dict | N
     session.commit()
     session.refresh(trace)
     return serialize_call(trace)
+
+
+def create_issue(session: Session, module_id: int, payload: dict) -> dict | None:
+    module = session.get(Module, module_id)
+    if module is None:
+        return None
+    issue = Issue(
+        module_id=module.id,
+        title=(payload.get("title") or "未命名问题").strip(),
+        issue_type=(payload.get("issue_type") or "content_quality").strip(),
+        owner=(payload.get("owner") or "未分配").strip(),
+        status=normalize_issue_status(payload.get("status") or IssueStatus.open.value),
+        notes=payload.get("notes") or "",
+    )
+    session.add(issue)
+    session.commit()
+    session.refresh(issue)
+    return serialize_issue(issue, module=module)
+
+
+def update_issue(session: Session, issue_id: int, payload: dict) -> dict | None:
+    issue = session.scalar(
+        select(Issue)
+        .where(Issue.id == issue_id)
+        .options(joinedload(Issue.module).joinedload(Module.page))
+    )
+    if issue is None:
+        return None
+    if "title" in payload:
+        issue.title = (payload.get("title") or issue.title).strip()
+    if "issue_type" in payload:
+        issue.issue_type = (payload.get("issue_type") or issue.issue_type).strip()
+    if "owner" in payload:
+        issue.owner = (payload.get("owner") or "未分配").strip()
+    if "status" in payload:
+        issue.status = normalize_issue_status(payload.get("status"))
+    if "notes" in payload:
+        issue.notes = payload.get("notes") or ""
+    session.commit()
+    session.refresh(issue)
+    return serialize_issue(issue)
+
+
+def list_issues(session: Session, status: str | None = None, owner: str | None = None, module_id: int | None = None) -> list[dict]:
+    statement = select(Issue).options(joinedload(Issue.module).joinedload(Module.page)).order_by(Issue.created_at.desc(), Issue.id.desc())
+    if status:
+        statement = statement.where(Issue.status == normalize_issue_status(status))
+    if owner:
+        statement = statement.where(Issue.owner == owner)
+    if module_id is not None:
+        statement = statement.where(Issue.module_id == module_id)
+    issues = session.scalars(statement).all()
+    return [serialize_issue(issue) for issue in issues]
+
+
+def normalize_issue_status(status: str | None) -> str:
+    allowed = {item.value for item in IssueStatus}
+    return status if status in allowed else IssueStatus.open.value
+
+
+def serialize_issue(issue: Issue, module: Module | None = None) -> dict:
+    resolved_module = module or issue.module
+    return {
+        "id": issue.id,
+        "module_id": issue.module_id,
+        "module_name": resolved_module.name if resolved_module else "",
+        "page_name": resolved_module.page.name if resolved_module and resolved_module.page else "",
+        "title": issue.title,
+        "issue_type": issue.issue_type,
+        "owner": issue.owner,
+        "status": issue.status,
+        "notes": issue.notes,
+        "created_at": issue.created_at.isoformat(),
+    }
 
 
 def list_call_traces(session: Session, limit: int = 20, request_type: str | None = None) -> list[dict]:
