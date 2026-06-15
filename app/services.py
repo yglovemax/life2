@@ -1,7 +1,16 @@
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.models import CallTrace, FieldContract, Module, PromptTemplate
+from app.models import CallTrace, FieldContract, ModelConfig, Module, Page, PromptTemplate
+
+
+PROMPT_KEYS = [
+    "shared_prefix",
+    "module_rules",
+    "algorithm_data_template",
+    "user_preferences_template",
+    "final_request_template",
+]
 
 
 def list_modules(session: Session) -> list[dict]:
@@ -34,6 +43,36 @@ def list_modules(session: Session) -> list[dict]:
             }
         )
     return rows
+
+
+def list_pages(session: Session) -> list[dict]:
+    pages = session.scalars(select(Page).order_by(Page.id)).all()
+    return [
+        {
+            "id": page.id,
+            "slug": page.slug,
+            "name": page.name,
+            "description": page.description,
+        }
+        for page in pages
+    ]
+
+
+def list_models(session: Session) -> list[dict]:
+    models = session.scalars(select(ModelConfig).order_by(ModelConfig.id)).all()
+    return [
+        {
+            "id": model.id,
+            "provider": model.provider,
+            "name": model.name,
+            "display_name": model.display_name,
+            "quality_tier": model.quality_tier,
+            "input_cost_per_1m": model.input_cost_per_1m,
+            "output_cost_per_1m": model.output_cost_per_1m,
+            "is_active": model.is_active,
+        }
+        for model in models
+    ]
 
 
 def get_module_detail(session: Session, module_id: int) -> dict | None:
@@ -105,6 +144,87 @@ def serialize_field(field: FieldContract) -> dict:
         "status": field.status,
         "change_log": field.change_log,
     }
+
+
+def create_module(session: Session, payload: dict) -> dict:
+    page_id = int(payload["page_id"])
+    model_id = payload.get("model_id")
+    module = Module(
+        page_id=page_id,
+        model_id=int(model_id) if model_id else None,
+        slug=payload["slug"].strip(),
+        name=payload["name"].strip(),
+        owner=payload.get("owner") or "未分配",
+        status=payload.get("status") or "draft",
+        fallback_content=payload.get("fallback_content") or "",
+        algorithm_fields=payload.get("algorithm_fields") or {},
+        knowledge_tags=payload.get("knowledge_tags") or [],
+    )
+    session.add(module)
+    session.flush()
+    session.add(build_prompt(module.id, payload.get("prompt") or {}))
+    for field_payload in payload.get("fields") or []:
+        session.add(build_field(module.id, field_payload))
+    session.commit()
+    return get_module_detail(session, module.id) or {}
+
+
+def update_module(session: Session, module_id: int, payload: dict) -> dict | None:
+    module = session.scalar(
+        select(Module)
+        .where(Module.id == module_id)
+        .options(joinedload(Module.prompt), selectinload(Module.fields))
+    )
+    if module is None:
+        return None
+
+    module.page_id = int(payload["page_id"])
+    model_id = payload.get("model_id")
+    module.model_id = int(model_id) if model_id else None
+    module.slug = payload["slug"].strip()
+    module.name = payload["name"].strip()
+    module.owner = payload.get("owner") or "未分配"
+    module.status = payload.get("status") or "draft"
+    module.fallback_content = payload.get("fallback_content") or ""
+    module.algorithm_fields = payload.get("algorithm_fields") or {}
+    module.knowledge_tags = payload.get("knowledge_tags") or []
+
+    prompt_payload = payload.get("prompt") or {}
+    if module.prompt is None:
+        module.prompt = build_prompt(module.id, prompt_payload)
+    else:
+        for key in PROMPT_KEYS:
+            setattr(module.prompt, key, prompt_payload.get(key) or "")
+        module.prompt.version += 1
+
+    module.fields.clear()
+    session.flush()
+    for field_payload in payload.get("fields") or []:
+        module.fields.append(build_field(module.id, field_payload))
+
+    session.commit()
+    return get_module_detail(session, module.id)
+
+
+def build_prompt(module_id: int, payload: dict) -> PromptTemplate:
+    values = {key: payload.get(key) or "" for key in PROMPT_KEYS}
+    return PromptTemplate(module_id=module_id, **values)
+
+
+def build_field(module_id: int, payload: dict) -> FieldContract:
+    return FieldContract(
+        module_id=module_id,
+        field_name=(payload.get("field_name") or "").strip(),
+        purpose=payload.get("purpose") or "",
+        display_position=payload.get("display_position") or "",
+        example=payload.get("example") or "",
+        source=payload.get("source") or "ai",
+        is_ai_generated=payload.get("is_ai_generated", True),
+        is_required=payload.get("is_required", True),
+        owner=payload.get("owner") or "未分配",
+        status=payload.get("status") or "draft",
+        change_log=payload.get("change_log") or "",
+    )
 
 
 def serialize_call(call: CallTrace) -> dict:

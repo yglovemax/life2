@@ -173,11 +173,27 @@ h2 {
   border-bottom: 1px solid var(--line);
 }
 
+.toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+input,
+textarea,
 select {
+  width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 12px;
   background: #fff;
+  color: var(--ink);
+}
+
+textarea {
+  min-height: 92px;
+  resize: vertical;
+  line-height: 1.5;
 }
 
 .table-wrap {
@@ -224,6 +240,24 @@ tbody tr.selected {
   padding: 18px;
   display: grid;
   gap: 18px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .empty {
@@ -277,6 +311,7 @@ tbody tr.selected {
 .actions {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 .primary {
@@ -289,6 +324,10 @@ tbody tr.selected {
   cursor: pointer;
 }
 
+.compact {
+  padding: 10px 12px;
+}
+
 .secondary {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -297,6 +336,62 @@ tbody tr.selected {
   color: var(--green);
   font-weight: 800;
   cursor: pointer;
+}
+
+.danger {
+  border: 1px solid rgba(167, 71, 63, 0.25);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff7f5;
+  color: var(--red);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.notice {
+  border: 1px solid #b9d6cb;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #eff8f4;
+  color: var(--green);
+  font-weight: 700;
+}
+
+.field-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.field-row {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fffefa;
+  display: grid;
+  gap: 10px;
+}
+
+.field-row-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.checks {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.checks label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+}
+
+.checks input {
+  width: auto;
 }
 
 @media (max-width: 1100px) {
@@ -309,7 +404,9 @@ tbody tr.selected {
   }
 
   .layout,
-  .metrics {
+  .metrics,
+  .form-grid,
+  .field-row-grid {
     grid-template-columns: 1fr;
   }
 }

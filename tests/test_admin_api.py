@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from uuid import uuid4
 
 from app.main import app
 
@@ -74,3 +75,120 @@ def test_test_run_creates_call_trace_with_final_json():
     detail_response = client.get(f"/api/modules/{module_id}")
     detail = detail_response.json()
     assert detail["recent_calls"][0]["id"] == data["id"]
+
+
+def test_create_module_saves_prompt_fields_and_fallback_as_draft():
+    pages_response = client.get("/api/pages")
+    models_response = client.get("/api/models")
+    assert pages_response.status_code == 200
+    assert models_response.status_code == 200
+    page_id = pages_response.json()["items"][0]["id"]
+    model_id = models_response.json()["items"][0]["id"]
+    slug = f"config-test-{uuid4().hex}"
+
+    response = client.post(
+        "/api/modules",
+        json={
+            "page_id": page_id,
+            "model_id": model_id,
+            "slug": slug,
+            "name": "配置闭环测试模块",
+            "owner": "产品经理",
+            "status": "draft",
+            "fallback_content": "备用内容",
+            "algorithm_fields": {"required": ["sun_sign"]},
+            "knowledge_tags": ["占星", "测试"],
+            "prompt": {
+                "shared_prefix": "共享规则",
+                "module_rules": "模块规则",
+                "algorithm_data_template": "算法模板",
+                "user_preferences_template": "偏好模板",
+                "final_request_template": "最终请求",
+            },
+            "fields": [
+                {
+                    "field_name": "summary",
+                    "purpose": "核心内容",
+                    "display_position": "测试卡片",
+                    "example": "这是一段示例",
+                    "source": "ai",
+                    "is_ai_generated": True,
+                    "is_required": True,
+                    "owner": "Prompt",
+                    "status": "draft",
+                    "change_log": "初始创建",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["slug"] == slug
+    assert data["status"] == "draft"
+    assert data["fallback_content"] == "备用内容"
+    assert data["prompt"]["module_rules"] == "模块规则"
+    assert data["fields"][0]["field_name"] == "summary"
+
+
+def test_update_module_replaces_prompt_fields_and_keeps_detail_consistent():
+    pages_response = client.get("/api/pages")
+    models_response = client.get("/api/models")
+    page_id = pages_response.json()["items"][0]["id"]
+    model_id = models_response.json()["items"][0]["id"]
+    slug = f"editable-test-{uuid4().hex}"
+    create_response = client.post(
+        "/api/modules",
+        json={
+            "page_id": page_id,
+            "model_id": model_id,
+            "slug": slug,
+            "name": "待编辑模块",
+            "owner": "未分配",
+            "fallback_content": "旧备用",
+            "prompt": {
+                "shared_prefix": "旧共享",
+                "module_rules": "旧规则",
+                "algorithm_data_template": "旧算法",
+                "user_preferences_template": "旧偏好",
+                "final_request_template": "旧最终",
+            },
+            "fields": [{"field_name": "old", "purpose": "旧字段", "example": "旧示例"}],
+        },
+    )
+    module_id = create_response.json()["id"]
+
+    update_response = client.put(
+        f"/api/modules/{module_id}",
+        json={
+            "page_id": page_id,
+            "model_id": model_id,
+            "slug": slug,
+            "name": "已编辑模块",
+            "owner": "Prompt 负责人",
+            "status": "pending_test",
+            "fallback_content": "新备用",
+            "algorithm_fields": {"required": ["moon_sign", "date"]},
+            "knowledge_tags": ["日运", "关系"],
+            "prompt": {
+                "shared_prefix": "新共享",
+                "module_rules": "新规则",
+                "algorithm_data_template": "新算法",
+                "user_preferences_template": "新偏好",
+                "final_request_template": "新最终",
+            },
+            "fields": [
+                {"field_name": "title", "purpose": "标题", "example": "今日建议", "source": "fixed_config", "is_ai_generated": False},
+                {"field_name": "summary", "purpose": "正文", "example": "适合沟通", "source": "ai", "is_ai_generated": True},
+            ],
+        },
+    )
+
+    assert update_response.status_code == 200
+    data = update_response.json()
+    assert data["name"] == "已编辑模块"
+    assert data["owner"] == "Prompt 负责人"
+    assert data["status"] == "pending_test"
+    assert data["fallback_content"] == "新备用"
+    assert data["prompt"]["shared_prefix"] == "新共享"
+    assert [field["field_name"] for field in data["fields"]] == ["title", "summary"]
