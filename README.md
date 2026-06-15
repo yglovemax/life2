@@ -58,6 +58,7 @@ export NEXA_OPENAI_API_KEY="<openai_api_key>"
 
 App 对接说明见：`docs/app-api.md`
 安全审计说明见：`docs/security.md`
+旧项目复用清单见：`docs/reuse-inventory.md`
 
 ## 测试
 
