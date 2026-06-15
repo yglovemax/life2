@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Nexa AI API Admin</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">N</span>
+        <div>
+          <strong>Nexa Admin</strong>
+          <small>AI API 控制台</small>
+        </div>
+      </div>
+      <nav>
+        <button class="active">模块中心</button>
+        <button>测试中心</button>
+        <button>知识库</button>
+        <button>成本中心</button>
+        <button>发布中心</button>
+        <button>安全审计</button>
+      </nav>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div>
+          <p>Phase 1 Console</p>
+          <h1>AI API 管理后台</h1>
+        </div>
+        <div class="status-pill">星座 / 占星一期</div>
+      </header>
+
+      <section class="metrics" id="metrics"></section>
+
+      <section class="layout">
+        <section class="panel module-center">
+          <div class="panel-head">
+            <div>
+              <p>Module Center</p>
+              <h2>模块中心</h2>
+            </div>
+            <select id="pageFilter">
+              <option value="">全部页面</option>
+            </select>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>模块</th>
+                  <th>页面</th>
+                  <th>负责人</th>
+                  <th>模型</th>
+                  <th>状态</th>
+                  <th>调用</th>
+                  <th>Fallback</th>
+                </tr>
+              </thead>
+              <tbody id="moduleRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel detail" id="detailPanel">
+          <div class="empty">选择一个模块查看 Prompt、字段契约和调用追踪。</div>
+        </section>
+      </section>
+    </main>
+    <script src="/static/admin.js"></script>
+  </body>
+</html>
