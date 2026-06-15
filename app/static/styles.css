@@ -537,6 +537,39 @@ label {
   background: #f8fbf9;
 }
 
+.endpoint-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.endpoint-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fffefa;
+  display: grid;
+  gap: 8px;
+}
+
+.endpoint-card span {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 5px 8px;
+  background: var(--green-2);
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.endpoint-card code {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: #fff;
+  color: #26302d;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1100px) {
   body {
     grid-template-columns: 1fr;

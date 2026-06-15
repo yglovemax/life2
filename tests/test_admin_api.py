@@ -398,3 +398,65 @@ def test_publish_and_rollback_create_module_versions_and_update_status():
     versions = versions_response.json()["items"]
     assert versions[0]["status"] == "rolled_back"
     assert any(item["status"] == "gray" for item in versions)
+
+
+def test_app_module_api_requires_token():
+    response = client.post(
+        "/api/app/modules/birth-basic-chart-info/render",
+        json={"input_payload": {"sun_sign": "白羊座"}},
+    )
+
+    assert response.status_code == 401
+
+
+def test_app_module_api_returns_json_with_request_trace_id_and_official_trace():
+    module = client.get("/api/modules").json()["items"][0]
+    client.post(f"/api/modules/{module['id']}/publish", json={"status": "live", "operator": "qa"})
+
+    response = client.post(
+        f"/api/app/modules/{module['slug']}/render",
+        headers={"Authorization": "Bearer dev-app-token"},
+        json={
+            "user_id": "app_user_001",
+            "date": "2026-06-15",
+            "input_payload": {"sun_sign": "白羊座", "nickname": "max"},
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["request_id"].startswith("req_")
+    assert data["trace_id"]
+    assert data["module"]["slug"] == module["slug"]
+    assert data["result"]["module_slug"] == module["slug"]
+    assert data["meta"]["request_type"] == "official"
+
+    traces = client.get("/api/call-traces?request_type=official").json()["items"]
+    assert any(trace["id"] == data["trace_id"] and trace["request_type"] == "official" for trace in traces)
+
+
+def test_app_page_api_renders_live_or_gray_modules_only():
+    modules = client.get("/api/modules").json()["items"]
+    birth_modules = [item for item in modules if item["page_name"] == "出生星盘解读页"]
+    live_module = birth_modules[0]
+    draft_module = birth_modules[1]
+    client.post(f"/api/modules/{live_module['id']}/publish", json={"status": "gray", "operator": "qa"})
+
+    response = client.post(
+        "/api/app/pages/birth-chart-reading/render",
+        headers={"X-Nexa-Api-Key": "dev-app-token"},
+        json={
+            "user_id": "app_user_001",
+            "date": "2026-06-15",
+            "input_payload": {"sun_sign": "白羊座", "nickname": "max"},
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    slugs = [item["module"]["slug"] for item in data["modules"]]
+    assert data["request_id"].startswith("req_")
+    assert data["page"]["slug"] == "birth-chart-reading"
+    assert live_module["slug"] in slugs
+    assert draft_module["slug"] not in slugs
+    assert all(item["trace_id"] for item in data["modules"])

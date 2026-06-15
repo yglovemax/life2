@@ -21,6 +21,7 @@
         <button data-view="knowledge">知识库</button>
         <button data-view="cost-center">成本中心</button>
         <button data-view="release-center">发布中心</button>
+        <button data-view="app-api">App 接口</button>
         <button>安全审计</button>
       </nav>
     </aside>
@@ -308,6 +309,66 @@
           </div>
           <div class="detail-body">
             <div id="releaseVersionList" class="trace-list"></div>
+          </div>
+        </section>
+      </section>
+
+      <section class="layout hidden" id="appApiView">
+        <section class="panel module-center">
+          <div class="panel-head">
+            <div>
+              <p>App API</p>
+              <h2>App 后端对接</h2>
+            </div>
+            <button class="secondary compact" id="refreshAppApiButton">刷新</button>
+          </div>
+          <div class="detail-body">
+            <div id="appApiNotice"></div>
+            <section>
+              <h3>正式接口测试</h3>
+              <div class="form-grid">
+                <label>页面
+                  <select id="appApiPage"></select>
+                </label>
+                <label>模块
+                  <select id="appApiModule"></select>
+                </label>
+                <label class="wide">App Token
+                  <input id="appApiToken" value="dev-app-token" />
+                </label>
+                <label class="wide">请求 JSON
+                  <textarea id="appApiPayload"></textarea>
+                </label>
+              </div>
+              <div class="actions">
+                <button class="primary" id="callAppPageButton">测试页面接口</button>
+                <button class="secondary" id="callAppModuleButton">测试模块接口</button>
+              </div>
+            </section>
+
+            <section class="section">
+              <h3>接口地址</h3>
+              <div class="endpoint-grid" id="appApiEndpoints"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel detail">
+          <div class="panel-head">
+            <div>
+              <p>Official Traces</p>
+              <h2>正式调用追踪</h2>
+            </div>
+          </div>
+          <div class="detail-body">
+            <section>
+              <h3>本次响应</h3>
+              <div id="appApiResult" class="trace-list"><p class="empty">还没有发起 App 接口测试。</p></div>
+            </section>
+            <section class="section">
+              <h3>最近正式调用</h3>
+              <div id="officialTraceList" class="trace-list"></div>
+            </section>
           </div>
         </section>
       </section>

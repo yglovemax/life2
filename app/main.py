@@ -1,10 +1,11 @@
 from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
+from app.core.settings import get_settings
 from app.db import get_session, init_db
 from app.seed import ensure_seed_data
 from app.services import (
@@ -25,6 +26,8 @@ from app.services import (
     metrics,
     publish_module,
     rollback_module,
+    render_app_module,
+    render_app_page,
     run_batch_tests,
     run_module_test,
     score_call_trace,
@@ -55,6 +58,15 @@ static_dir = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
+def require_app_token(authorization: str | None = Header(default=None), x_nexa_api_key: str | None = Header(default=None)) -> bool:
+    token = x_nexa_api_key or ""
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+    if token != get_settings().app_api_token:
+        raise HTTPException(status_code=401, detail="invalid app api token")
+    return True
+
+
 @app.get("/", response_class=HTMLResponse)
 def root() -> HTMLResponse:
     return HTMLResponse('<meta http-equiv="refresh" content="0; url=/admin">')
@@ -68,6 +80,32 @@ def admin() -> FileResponse:
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok", "service": "nexa-ai-api-admin"}
+
+
+@app.post("/api/app/modules/{module_slug}/render")
+def app_module_render(
+    module_slug: str,
+    payload: dict,
+    _: bool = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    rendered = render_app_module(session, module_slug, payload)
+    if rendered is None:
+        raise HTTPException(status_code=404, detail="module not found or not published")
+    return rendered
+
+
+@app.post("/api/app/pages/{page_slug}/render")
+def app_page_render(
+    page_slug: str,
+    payload: dict,
+    _: bool = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    rendered = render_app_page(session, page_slug, payload)
+    if rendered is None:
+        raise HTTPException(status_code=404, detail="page not found")
+    return rendered
 
 
 @app.get("/api/modules")
@@ -174,8 +212,8 @@ def batch_test_run(payload: dict, session: Session = Depends(get_session)) -> di
 
 
 @app.get("/api/call-traces")
-def call_traces(session: Session = Depends(get_session)) -> dict:
-    return {"items": list_call_traces(session)}
+def call_traces(request_type: str | None = None, session: Session = Depends(get_session)) -> dict:
+    return {"items": list_call_traces(session, request_type=request_type)}
 
 
 @app.put("/api/call-traces/{trace_id}/score")

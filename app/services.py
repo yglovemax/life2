@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -22,6 +24,8 @@ PROMPT_KEYS = [
     "user_preferences_template",
     "final_request_template",
 ]
+
+APP_ACTIVE_STATUSES = {ModuleStatus.gray.value, ModuleStatus.live.value}
 
 DEMO_TEST_USERS = [
     {
@@ -480,10 +484,13 @@ def run_module_test(session: Session, module_id: int, payload: dict) -> dict | N
     )
     if module is None:
         return None
+    return run_module_trace(session, module, payload, request_type="test", allow_model_override=True)
 
+
+def run_module_trace(session: Session, module: Module, payload: dict, request_type: str, allow_model_override: bool = False) -> dict:
     prompt = module.prompt or PromptTemplate(module_id=module.id)
     model_name = module.model.display_name if module.model else "未配置"
-    if payload.get("model_id"):
+    if allow_model_override and payload.get("model_id"):
         override_model = session.get(ModelConfig, int(payload["model_id"]))
         if override_model is not None:
             model_name = override_model.display_name
@@ -519,7 +526,9 @@ def run_module_test(session: Session, module_id: int, payload: dict) -> dict | N
         }
         status = "fallback"
     else:
-        summary = f"{module.name}测试输出：已根据 {payload.get('test_user', '测试用户')} 和 {payload.get('date', '未指定日期')} 生成内容。"
+        caller = payload.get("test_user") or payload.get("user_id") or "测试用户"
+        output_label = "正式输出" if request_type == "official" else "测试输出"
+        summary = f"{module.name}{output_label}：已根据 {caller} 和 {payload.get('date', '未指定日期')} 生成内容。"
         final_json = {
             "module_id": module.id,
             "module_slug": module.slug,
@@ -537,7 +546,7 @@ def run_module_test(session: Session, module_id: int, payload: dict) -> dict | N
     output_tokens = max(1, len(str(raw_response)) // 4)
     trace = CallTrace(
         module_id=module.id,
-        request_type="test",
+        request_type=request_type,
         input_payload=payload,
         model_request=model_request,
         model_raw_response=str(raw_response),
@@ -579,9 +588,88 @@ def score_call_trace(session: Session, trace_id: int, payload: dict) -> dict | N
     return serialize_call(trace)
 
 
-def list_call_traces(session: Session, limit: int = 20) -> list[dict]:
-    traces = session.scalars(select(CallTrace).order_by(CallTrace.created_at.desc()).limit(limit)).all()
+def list_call_traces(session: Session, limit: int = 20, request_type: str | None = None) -> list[dict]:
+    statement = select(CallTrace).order_by(CallTrace.created_at.desc()).limit(limit)
+    if request_type:
+        statement = select(CallTrace).where(CallTrace.request_type == request_type).order_by(CallTrace.created_at.desc()).limit(limit)
+    traces = session.scalars(statement).all()
     return [serialize_call(trace) for trace in traces]
+
+
+def render_app_module(session: Session, module_slug: str, payload: dict, request_id: str | None = None) -> dict | None:
+    module = session.scalar(
+        select(Module)
+        .where(Module.slug == module_slug)
+        .options(joinedload(Module.page), joinedload(Module.model), joinedload(Module.prompt), selectinload(Module.fields))
+    )
+    if module is None or module.status not in APP_ACTIVE_STATUSES:
+        return None
+
+    resolved_request_id = request_id or new_request_id()
+    trace_payload = {**payload, "request_id": resolved_request_id}
+    trace = run_module_trace(session, module, trace_payload, request_type="official", allow_model_override=False)
+    return app_module_response(module, trace, resolved_request_id)
+
+
+def render_app_page(session: Session, page_slug: str, payload: dict) -> dict | None:
+    page = session.scalar(
+        select(Page)
+        .where(Page.slug == page_slug)
+        .options(
+            selectinload(Page.modules).joinedload(Module.model),
+            selectinload(Page.modules).joinedload(Module.prompt),
+            selectinload(Page.modules).selectinload(Module.fields),
+        )
+    )
+    if page is None:
+        return None
+
+    request_id = new_request_id()
+    modules = sorted((module for module in page.modules if module.status in APP_ACTIVE_STATUSES), key=lambda module: module.id)
+    rendered_modules = []
+    for module in modules:
+        trace = run_module_trace(session, module, {**payload, "request_id": request_id}, "official")
+        rendered_modules.append(app_module_response(module, trace, request_id))
+    return {
+        "request_id": request_id,
+        "page": {
+            "id": page.id,
+            "slug": page.slug,
+            "name": page.name,
+        },
+        "modules": rendered_modules,
+        "meta": {
+            "request_type": "official",
+            "module_count": len(rendered_modules),
+        },
+    }
+
+
+def app_module_response(module: Module, trace: dict, request_id: str) -> dict:
+    return {
+        "request_id": request_id,
+        "trace_id": trace["id"],
+        "module": {
+            "id": module.id,
+            "slug": module.slug,
+            "name": module.name,
+            "page_slug": module.page.slug if module.page else "",
+            "page_name": module.page.name if module.page else "",
+            "version": module.version,
+            "status": module.status,
+        },
+        "result": trace["final_json"],
+        "meta": {
+            "request_type": trace["request_type"],
+            "model_name": trace["model_name"],
+            "prompt_version": trace["prompt_version"],
+            "estimated_cost_cents": trace["estimated_cost_cents"],
+        },
+    }
+
+
+def new_request_id() -> str:
+    return f"req_{uuid4().hex[:18]}"
 
 
 def cost_summary(session: Session) -> dict:

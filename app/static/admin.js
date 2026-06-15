@@ -11,6 +11,7 @@ let latestTestResults = [];
 let costSummaryData = null;
 let fallbackAlerts = [];
 let releaseVersions = [];
+let latestAppApiResult = null;
 
 const promptLabels = {
   shared_prefix: "共享静态前缀",
@@ -21,9 +22,10 @@ const promptLabels = {
 };
 
 async function getJson(url, options) {
+  const headers = { "Content-Type": "application/json", ...(options?.headers || {}) };
   const response = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers,
   });
   if (!response.ok) throw new Error(await response.text());
   return response.json();
@@ -448,10 +450,12 @@ function showView(view) {
   document.querySelector("#knowledgeView").classList.toggle("hidden", view !== "knowledge");
   document.querySelector("#costCenterView").classList.toggle("hidden", view !== "cost-center");
   document.querySelector("#releaseCenterView").classList.toggle("hidden", view !== "release-center");
+  document.querySelector("#appApiView").classList.toggle("hidden", view !== "app-api");
   if (view === "test-center") renderTestCenter();
   if (view === "knowledge") renderKnowledgeWorkspace();
   if (view === "cost-center") renderCostCenter();
   if (view === "release-center") renderReleaseCenter();
+  if (view === "app-api") renderAppApiWorkspace();
 }
 
 function renderTestCenter() {
@@ -873,11 +877,111 @@ async function rollbackSelectedModule() {
   }
 }
 
+function setupAppApiActions() {
+  document.querySelector("#refreshAppApiButton").onclick = renderAppApiWorkspace;
+  document.querySelector("#callAppPageButton").onclick = () => callAppApi("page");
+  document.querySelector("#callAppModuleButton").onclick = () => callAppApi("module");
+}
+
+async function renderAppApiWorkspace() {
+  renderAppApiControls();
+  renderAppApiEndpoints();
+  await loadOfficialTraces();
+}
+
+function renderAppApiControls() {
+  const pageSelect = document.querySelector("#appApiPage");
+  const selectedPage = pageSelect.value || pages[0]?.slug || "";
+  pageSelect.innerHTML = pages.map((page) => `<option value="${escapeHtml(page.slug)}">${escapeHtml(page.name)} · ${escapeHtml(page.slug)}</option>`).join("");
+  pageSelect.value = selectedPage;
+  pageSelect.onchange = renderAppApiEndpoints;
+
+  const moduleSelect = document.querySelector("#appApiModule");
+  const selectedModule = moduleSelect.value || modules[0]?.slug || "";
+  moduleSelect.innerHTML = modules
+    .map((module) => `<option value="${escapeHtml(module.slug)}">${escapeHtml(module.name)} · ${escapeHtml(module.slug)} · ${statusLabel(module.status)}</option>`)
+    .join("");
+  moduleSelect.value = selectedModule;
+  moduleSelect.onchange = renderAppApiEndpoints;
+
+  if (!document.querySelector("#appApiPayload").value.trim()) {
+    document.querySelector("#appApiPayload").value = safeJson({
+      user_id: "app_user_001",
+      date: new Date().toISOString().slice(0, 10),
+      input_payload: {
+        nickname: "max",
+        sun_sign: "白羊座",
+        moon_sign: "处女座",
+      },
+    });
+  }
+}
+
+function renderAppApiEndpoints() {
+  const pageSlug = document.querySelector("#appApiPage").value || pages[0]?.slug || "";
+  const moduleSlug = document.querySelector("#appApiModule").value || modules[0]?.slug || "";
+  const endpoints = [
+    ["页面级 JSON API", "POST", `/api/app/pages/${pageSlug}/render`],
+    ["模块级 JSON API", "POST", `/api/app/modules/${moduleSlug}/render`],
+  ];
+  document.querySelector("#appApiEndpoints").innerHTML = endpoints
+    .map(
+      ([title, method, path]) => `<article class="endpoint-card">
+        <span>${method}</span>
+        <strong>${escapeHtml(title)}</strong>
+        <code>${escapeHtml(path)}</code>
+      </article>`
+    )
+    .join("");
+}
+
+async function callAppApi(kind) {
+  const notice = document.querySelector("#appApiNotice");
+  try {
+    const token = document.querySelector("#appApiToken").value.trim();
+    if (!token) throw new Error("App Token 不能为空");
+    const payload = parseJsonInput("#appApiPayload", {});
+    const pageSlug = document.querySelector("#appApiPage").value;
+    const moduleSlug = document.querySelector("#appApiModule").value;
+    const url = kind === "page" ? `/api/app/pages/${pageSlug}/render` : `/api/app/modules/${moduleSlug}/render`;
+    latestAppApiResult = await getJson(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: JSON.stringify(payload),
+    });
+    notice.innerHTML = `<div class="notice">${kind === "page" ? "页面" : "模块"}接口调用完成，request_id: ${escapeHtml(latestAppApiResult.request_id)}</div>`;
+    renderAppApiResult();
+    await loadMetrics();
+    await loadModules();
+    await loadOfficialTraces();
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderAppApiResult() {
+  const container = document.querySelector("#appApiResult");
+  if (!latestAppApiResult) {
+    container.innerHTML = '<p class="empty">还没有发起 App 接口测试。</p>';
+    return;
+  }
+  container.innerHTML = `<article class="trace-card">
+    <span>${escapeHtml(latestAppApiResult.request_id)} · trace ${escapeHtml(latestAppApiResult.trace_id || "page")}</span>
+    <pre>${escapeHtml(JSON.stringify(latestAppApiResult, null, 2))}</pre>
+  </article>`;
+}
+
+async function loadOfficialTraces() {
+  const data = await getJson("/api/call-traces?request_type=official");
+  document.querySelector("#officialTraceList").innerHTML = data.items.length ? data.items.map(traceCard).join("") : '<p class="empty">暂无正式调用。</p>';
+}
+
 async function boot() {
   setupNavigation();
   setupKnowledgeActions();
   setupCostActions();
   setupReleaseActions();
+  setupAppApiActions();
   document.querySelector("#createModuleButton").onclick = newModuleDraft;
   await loadMetadata();
   await loadMetrics();
