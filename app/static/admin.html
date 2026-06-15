@@ -167,10 +167,48 @@
               <p>Knowledge Base</p>
               <h2>知识库</h2>
             </div>
-            <button class="primary compact" id="saveMarkdownButton">上传 Markdown</button>
+            <button class="primary compact" id="saveMarkdownButton">保存 Markdown</button>
           </div>
           <div class="detail-body">
             <section>
+              <h3>训练资料入库</h3>
+              <div class="upload-zone" id="knowledgeUploadZone">
+                <div>
+                  <strong>拖拽资料到这里</strong>
+                  <p>支持 docx、pdf、md、txt、json、yaml，上传后自动解析并生成知识片段。</p>
+                </div>
+                <label class="file-picker">
+                  选择文件
+                  <input id="knowledgeUploadInput" type="file" multiple accept=".docx,.pdf,.md,.markdown,.txt,.json,.yaml,.yml" />
+                </label>
+              </div>
+              <div class="form-grid compact-grid">
+                <label>入库标签
+                  <input id="knowledgeUploadTags" placeholder="占星, 训练资料, 表达规则" />
+                </label>
+                <div class="file-list" id="knowledgeUploadFileList">还没有选择文件。</div>
+              </div>
+              <div class="actions">
+                <button class="primary compact" id="uploadKnowledgeFilesButton">上传并入库</button>
+              </div>
+            </section>
+
+            <section class="section">
+              <h3>GitHub 导入</h3>
+              <div class="form-grid">
+                <label class="wide">公开仓库 / 文件 / 文件夹链接
+                  <input id="knowledgeGithubUrl" placeholder="https://github.com/org/repo 或 https://github.com/org/repo/tree/main/docs" />
+                </label>
+                <label>导入标签
+                  <input id="knowledgeGithubTags" placeholder="GitHub, 占星, 外部资料" />
+                </label>
+              </div>
+              <div class="actions">
+                <button class="secondary compact" id="importGithubKnowledgeButton">从 GitHub 导入</button>
+              </div>
+            </section>
+
+            <section class="section">
               <h3>上传 Markdown 文档</h3>
               <div class="form-grid">
                 <label>资料名称

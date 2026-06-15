@@ -16,6 +16,8 @@ class Settings(BaseModel):
     openai_api_key: str = os.environ.get("NEXA_OPENAI_API_KEY", "")
     openai_base_url: str = os.environ.get("NEXA_OPENAI_BASE_URL", "https://api.openai.com/v1")
     model_request_timeout_seconds: int = int(os.environ.get("NEXA_MODEL_REQUEST_TIMEOUT_SECONDS", "45"))
+    upload_storage_dir: str = os.environ.get("NEXA_UPLOAD_STORAGE_DIR", "./data/uploads")
+    max_upload_file_bytes: int = int(os.environ.get("NEXA_MAX_UPLOAD_FILE_BYTES", str(8 * 1024 * 1024)))
 
     @property
     def sqlite_path(self) -> Path | None:

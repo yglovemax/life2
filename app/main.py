@@ -21,6 +21,7 @@ from app.services import (
     create_module,
     create_output_policy,
     get_module_detail,
+    import_github_knowledge_sources,
     list_app_api_keys,
     list_audit_events,
     list_fallback_alerts,
@@ -55,6 +56,7 @@ from app.services import (
     update_module,
     update_output_policy,
     update_issue,
+    upload_knowledge_files,
 )
 
 
@@ -227,6 +229,22 @@ def knowledge_sources(session: Session = Depends(get_session)) -> dict:
 @app.post("/api/knowledge-sources")
 def knowledge_source_create(payload: dict, session: Session = Depends(get_session)) -> dict:
     return create_knowledge_source(session, payload)
+
+
+@app.post("/api/knowledge/uploads")
+def knowledge_uploads(payload: dict, session: Session = Depends(get_session)) -> dict:
+    try:
+        return upload_knowledge_files(session, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/knowledge/github-import")
+def knowledge_github_import(payload: dict, session: Session = Depends(get_session)) -> dict:
+    try:
+        return import_github_knowledge_sources(session, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/knowledge-entries")

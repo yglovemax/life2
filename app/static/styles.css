@@ -466,6 +466,76 @@ label {
   width: auto;
 }
 
+.upload-zone {
+  border: 1px dashed #b9c7bd;
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  background: #fbfaf5;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.upload-zone.drag-over {
+  border-color: var(--green);
+  background: var(--green-2);
+}
+
+.upload-zone strong {
+  display: block;
+  font-size: 16px;
+}
+
+.upload-zone p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.file-picker {
+  width: auto;
+  min-width: 104px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--green);
+  background: #fff;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.file-picker input {
+  display: none;
+}
+
+.file-list {
+  align-self: end;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  background: #fff;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.file-list span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 9px;
+  background: #fffefa;
+  color: var(--ink);
+  font-weight: 700;
+}
+
 .module-checks {
   display: grid;
   gap: 8px;

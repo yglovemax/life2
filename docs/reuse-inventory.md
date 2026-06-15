@@ -56,6 +56,24 @@ astro_daily_agent/.venv/bin/python -m unittest \
 4. 旧前端 UI 不整体搬，只参考交互和字段。
 5. 旧测试用例要随模块一起迁，保证不是凭感觉复用。
 
+## 本次迁移状态
+
+已迁入 `life2`：
+
+- `app/training/documents.py`：训练资料解析，支持 docx、pdf、md、txt、json、yaml。
+- `app/training/github_import.py`：公开 GitHub repo/tree/blob/raw 导入。
+- `app/platform/object_storage.py`：本地对象存储抽象，后续可替换 S3/R2。
+- `app/platform/tasks.py`：任务队列信封和内存/Redis 兼容队列接口。
+- `app/platform/rate_limit.py`：内存/Redis 兼容限流接口。
+- `POST /api/knowledge/uploads`：本地文件上传后自动解析并创建 `KnowledgeSource` / `KnowledgeChunk`。
+- `POST /api/knowledge/github-import`：GitHub 资料导入后复用同一条知识入库管线。
+- 后台知识库页面：新增拖拽上传、文件选择、GitHub 导入控件。
+
+已补测试：
+
+- `tests/test_training_ingestion.py`
+- `tests/test_platform_primitives.py`
+
 ## 可直接复用
 
 ### 文件上传与资料解析
@@ -73,7 +91,7 @@ astro_daily_agent/.venv/bin/python -m unittest \
 - 普通文本按段落和长度切分。
 - DOCX 优先走占星结构化解析，失败后退回普通段落。
 
-迁入阶段：第三期训练中心 2.0。
+迁入状态：已迁入第一批训练入库能力，路径为 `app/training/documents.py`。
 
 迁移方式：可直接复制为 `app/services/training_documents.py` 或拆进 `app/training/documents.py`，把返回的 `KnowledgeEntry` 适配成 `life2` 的 `KnowledgeSource` / `KnowledgeChunk`。
 
@@ -91,7 +109,7 @@ astro_daily_agent/.venv/bin/python -m unittest \
 - 限制文件数量和文件大小。
 - 返回 upload pipeline 兼容结构。
 
-迁入阶段：第三期训练中心 2.0。
+迁入状态：已迁入第一批 GitHub 导入能力，路径为 `app/training/github_import.py`。
 
 迁移方式：核心函数可直接搬；把 `User-Agent` 改成 `Nexa-AI-Admin`，把错误类接到 FastAPI `HTTPException` 或服务层错误。
 

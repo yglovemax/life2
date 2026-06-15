@@ -1,3 +1,5 @@
+import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -5,12 +7,16 @@ import secrets
 import urllib.error
 import urllib.request
 from datetime import timedelta
+from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.settings import get_settings
+from app.platform.object_storage import LocalObjectStorage, safe_object_key
+from app.training.documents import entries_to_markdown, parse_training_document, safe_upload_filename
+from app.training.github_import import fetch_github_training_files
 from app.models import (
     AdminSession,
     AdminSessionStatus,
@@ -197,6 +203,99 @@ def create_manual_knowledge_entry(session: Session, payload: dict) -> dict:
     source_data = create_knowledge_source(session, source_payload)
     chunks = list_knowledge_chunks(session, tag=None, source_id=source_data["id"])
     return chunks[0] if chunks else source_data
+
+
+def upload_knowledge_files(session: Session, payload: dict, source_prefix: str = "uploaded") -> dict:
+    files = payload.get("files") or []
+    if not files:
+        raise ValueError("请至少选择一个训练资料文件。")
+
+    settings = get_settings()
+    storage = LocalObjectStorage(settings.upload_storage_dir)
+    base_tags = normalize_tags(payload.get("tags") or [])
+    sources: list[dict] = []
+
+    for index, file_payload in enumerate(files, start=1):
+        filename = safe_upload_filename(file_payload.get("filename") or f"upload-{index}.txt")
+        content = decode_upload_content(file_payload)
+        if len(content) > settings.max_upload_file_bytes:
+            raise ValueError(f"{filename} 超过单文件大小限制。")
+
+        object_key = safe_object_key("knowledge/uploads", filename, f"upload_{uuid4().hex[:12]}")
+        stored = storage.put_bytes(object_key, content, file_payload.get("content_type") or "application/octet-stream")
+        entries = parse_training_document(storage.resolve_key(stored.key))
+        if not entries:
+            raise ValueError(f"{filename} 没有解析出有效内容。")
+
+        content_markdown = entries_to_markdown(entries)
+        tags = merge_tags(base_tags, ["上传资料"] if source_prefix == "uploaded" else ["GitHub"])
+        source = create_knowledge_source(
+            session,
+            {
+                "title": file_payload.get("title") or Path(filename).stem,
+                "source_type": source_type_for_upload(filename, source_prefix),
+                "content": content_markdown,
+                "tags": tags,
+            },
+        )
+        source["object_key"] = stored.key
+        source["entry_count"] = len(entries)
+        sources.append(source)
+
+    return {
+        "uploaded": len(sources),
+        "chunks_created": sum(source["chunk_count"] for source in sources),
+        "sources": sources,
+    }
+
+
+def import_github_knowledge_sources(session: Session, payload: dict) -> dict:
+    url = (payload.get("url") or "").strip()
+    if not url:
+        raise ValueError("请输入 GitHub 仓库、文件或文件夹链接。")
+    github_files = fetch_github_training_files(url)
+    files = [
+        {
+            "filename": file["filename"],
+            "content": file["content"],
+            "content_type": file.get("content_type") or "application/octet-stream",
+            "metadata": file.get("metadata") or {},
+        }
+        for file in github_files
+    ]
+    return upload_knowledge_files(session, {**payload, "files": files}, source_prefix="github")
+
+
+def decode_upload_content(file_payload: dict) -> bytes:
+    if "content_base64" in file_payload:
+        try:
+            return base64.b64decode(str(file_payload.get("content_base64") or ""), validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("上传文件内容不是合法 base64。") from exc
+    content = file_payload.get("content")
+    if isinstance(content, bytes):
+        return content
+    if isinstance(content, str):
+        return content.encode("utf-8")
+    raise ValueError("上传文件缺少内容。")
+
+
+def source_type_for_upload(filename: str, source_prefix: str) -> str:
+    suffix = Path(filename).suffix.lower().lstrip(".") or "text"
+    suffix = {"markdown": "md", "yml": "yaml"}.get(suffix, suffix)
+    return f"{source_prefix}_{suffix}"
+
+
+def merge_tags(*groups: list[str]) -> list[str]:
+    seen: set[str] = set()
+    merged: list[str] = []
+    for group in groups:
+        for tag in normalize_tags(group):
+            if tag in seen:
+                continue
+            seen.add(tag)
+            merged.append(tag)
+    return merged
 
 
 def list_knowledge_sources(session: Session) -> list[dict]:

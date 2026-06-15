@@ -21,6 +21,7 @@ let modelProviderKeys = [];
 let outputPolicies = [];
 let latestRouterPreview = null;
 let createdAppToken = "";
+let pendingKnowledgeUploadFiles = [];
 let adminToken = localStorage.getItem("nexa_admin_token") || "";
 let adminUser = null;
 let consoleInitialized = false;
@@ -854,6 +855,24 @@ function setupKnowledgeActions() {
   document.querySelector("#saveManualKnowledgeButton").onclick = saveManualKnowledge;
   document.querySelector("#searchKnowledgeButton").onclick = searchKnowledge;
   document.querySelector("#refreshKnowledgeButton").onclick = renderKnowledgeWorkspace;
+  document.querySelector("#uploadKnowledgeFilesButton").onclick = uploadSelectedKnowledgeFiles;
+  document.querySelector("#importGithubKnowledgeButton").onclick = importGithubKnowledge;
+  document.querySelector("#knowledgeUploadInput").onchange = (event) => {
+    pendingKnowledgeUploadFiles = Array.from(event.target.files || []);
+    renderKnowledgeUploadFileList();
+  };
+  const uploadZone = document.querySelector("#knowledgeUploadZone");
+  uploadZone.ondragover = (event) => {
+    event.preventDefault();
+    uploadZone.classList.add("drag-over");
+  };
+  uploadZone.ondragleave = () => uploadZone.classList.remove("drag-over");
+  uploadZone.ondrop = (event) => {
+    event.preventDefault();
+    uploadZone.classList.remove("drag-over");
+    pendingKnowledgeUploadFiles = Array.from(event.dataTransfer.files || []);
+    renderKnowledgeUploadFileList();
+  };
 }
 
 async function renderKnowledgeWorkspace() {
@@ -888,6 +907,97 @@ async function saveMarkdownKnowledge() {
     await renderKnowledgeWorkspace();
   } catch (error) {
     notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderKnowledgeUploadFileList() {
+  const target = document.querySelector("#knowledgeUploadFileList");
+  if (!pendingKnowledgeUploadFiles.length) {
+    target.textContent = "还没有选择文件。";
+    return;
+  }
+  target.innerHTML = pendingKnowledgeUploadFiles
+    .map((file) => `<span>${escapeHtml(file.name)} · ${formatBytes(file.size)}</span>`)
+    .join("");
+}
+
+function formatBytes(value) {
+  const size = Number(value || 0);
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || "");
+      resolve(result.includes(",") ? result.split(",", 2)[1] : result);
+    };
+    reader.onerror = () => reject(new Error(`无法读取文件：${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadSelectedKnowledgeFiles() {
+  const notice = document.querySelector("#knowledgeNotice");
+  const button = document.querySelector("#uploadKnowledgeFilesButton");
+  try {
+    const files = pendingKnowledgeUploadFiles;
+    if (!files.length) throw new Error("请先选择或拖拽训练资料文件");
+    button.disabled = true;
+    button.textContent = "入库中...";
+    const uploadFiles = await Promise.all(
+      files.map(async (file) => ({
+        filename: file.name,
+        content_type: file.type || "application/octet-stream",
+        content_base64: await readFileAsBase64(file),
+      }))
+    );
+    const data = await getJson("/api/knowledge/uploads", {
+      method: "POST",
+      body: JSON.stringify({
+        tags: parseTags("#knowledgeUploadTags"),
+        files: uploadFiles,
+      }),
+    });
+    notice.innerHTML = `<div class="notice">已入库 ${data.uploaded} 份资料，生成 ${data.chunks_created} 个知识片段</div>`;
+    pendingKnowledgeUploadFiles = [];
+    document.querySelector("#knowledgeUploadInput").value = "";
+    renderKnowledgeUploadFileList();
+    await renderKnowledgeWorkspace();
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  } finally {
+    button.disabled = false;
+    button.textContent = "上传并入库";
+  }
+}
+
+async function importGithubKnowledge() {
+  const notice = document.querySelector("#knowledgeNotice");
+  const button = document.querySelector("#importGithubKnowledgeButton");
+  try {
+    const url = document.querySelector("#knowledgeGithubUrl").value.trim();
+    if (!url) throw new Error("请输入 GitHub 链接");
+    button.disabled = true;
+    button.textContent = "导入中...";
+    const data = await getJson("/api/knowledge/github-import", {
+      method: "POST",
+      body: JSON.stringify({
+        url,
+        tags: parseTags("#knowledgeGithubTags"),
+      }),
+    });
+    notice.innerHTML = `<div class="notice">GitHub 已导入 ${data.uploaded} 份资料，生成 ${data.chunks_created} 个知识片段</div>`;
+    document.querySelector("#knowledgeGithubUrl").value = "";
+    await renderKnowledgeWorkspace();
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  } finally {
+    button.disabled = false;
+    button.textContent = "从 GitHub 导入";
   }
 }
 
