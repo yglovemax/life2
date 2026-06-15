@@ -7,8 +7,10 @@ from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
 from app.db import get_session, init_db
+from app.models import AdminUser
 from app.seed import ensure_seed_data
 from app.services import (
+    authenticate_admin_token,
     authenticate_app_token,
     cost_summary,
     create_knowledge_source,
@@ -27,18 +29,21 @@ from app.services import (
     list_modules,
     list_pages,
     list_test_users,
+    login_admin,
     metrics,
     publish_module,
     record_audit_event,
     rollback_module,
     render_app_module,
     render_app_page,
+    revoke_admin_token,
     revoke_app_api_key,
     run_batch_tests,
     run_module_test,
     score_call_trace,
     search_knowledge,
     security_status,
+    serialize_admin_user,
     update_module,
 )
 
@@ -90,6 +95,22 @@ def require_app_token(
     return auth
 
 
+def bearer_token(authorization: str | None) -> str:
+    if authorization and authorization.lower().startswith("bearer "):
+        return authorization.split(" ", 1)[1].strip()
+    return ""
+
+
+def require_admin_session(
+    authorization: str | None = Header(default=None),
+    session: Session = Depends(get_session),
+) -> AdminUser:
+    user = authenticate_admin_token(session, bearer_token(authorization))
+    if user is None:
+        raise HTTPException(status_code=401, detail="admin login required")
+    return user
+
+
 @app.get("/", response_class=HTMLResponse)
 def root() -> HTMLResponse:
     return HTMLResponse('<meta http-equiv="refresh" content="0; url=/admin">')
@@ -103,6 +124,25 @@ def admin() -> FileResponse:
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok", "service": "nexa-ai-api-admin"}
+
+
+@app.post("/api/auth/login")
+def auth_login(payload: dict, session: Session = Depends(get_session)) -> dict:
+    result = login_admin(session, payload)
+    if result is None:
+        raise HTTPException(status_code=401, detail="invalid username or password")
+    return result
+
+
+@app.get("/api/auth/me")
+def auth_me(admin_user: AdminUser = Depends(require_admin_session)) -> dict:
+    return serialize_admin_user(admin_user)
+
+
+@app.post("/api/auth/logout")
+def auth_logout(authorization: str | None = Header(default=None), session: Session = Depends(get_session)) -> dict:
+    revoked = revoke_admin_token(session, bearer_token(authorization))
+    return {"ok": revoked}
 
 
 @app.post("/api/app/modules/{module_slug}/render")
@@ -281,17 +321,28 @@ def security_status_view(session: Session = Depends(get_session)) -> dict:
 
 
 @app.get("/api/security/app-keys")
-def security_app_keys(session: Session = Depends(get_session)) -> dict:
+def security_app_keys(_: AdminUser = Depends(require_admin_session), session: Session = Depends(get_session)) -> dict:
     return {"items": list_app_api_keys(session)}
 
 
 @app.post("/api/security/app-keys")
-def security_app_key_create(payload: dict, session: Session = Depends(get_session)) -> dict:
+def security_app_key_create(
+    payload: dict,
+    admin_user: AdminUser = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> dict:
+    payload = {**payload, "operator": payload.get("operator") or admin_user.username}
     return create_app_api_key(session, payload)
 
 
 @app.post("/api/security/app-keys/{key_id}/revoke")
-def security_app_key_revoke(key_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
+def security_app_key_revoke(
+    key_id: int,
+    payload: dict,
+    admin_user: AdminUser = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> dict:
+    payload = {**payload, "operator": payload.get("operator") or admin_user.username}
     key = revoke_app_api_key(session, key_id, payload)
     if key is None:
         raise HTTPException(status_code=404, detail="app key not found")
@@ -299,7 +350,11 @@ def security_app_key_revoke(key_id: int, payload: dict, session: Session = Depen
 
 
 @app.get("/api/security/audit-events")
-def security_audit_events(event_type: str | None = None, session: Session = Depends(get_session)) -> dict:
+def security_audit_events(
+    event_type: str | None = None,
+    _: AdminUser = Depends(require_admin_session),
+    session: Session = Depends(get_session),
+) -> dict:
     return {"items": list_audit_events(session, event_type=event_type)}
 
 

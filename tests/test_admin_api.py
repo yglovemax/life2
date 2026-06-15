@@ -7,10 +7,39 @@ from app.main import app
 client = TestClient(app)
 
 
+def admin_headers() -> dict:
+    response = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+    assert response.status_code == 200
+    return {"Authorization": f"Bearer {response.json()['token']}"}
+
+
 def test_health_reports_ok():
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+def test_admin_login_returns_session_and_me_endpoint_resolves_user():
+    login_response = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+    assert login_response.status_code == 200
+    login = login_response.json()
+    assert login["token"].startswith("adm_")
+    assert login["user"]["username"] == "admin"
+    assert login["user"]["role"] == "owner"
+
+    me_response = client.get("/api/auth/me", headers={"Authorization": f"Bearer {login['token']}"})
+    assert me_response.status_code == 200
+    assert me_response.json()["username"] == "admin"
+
+
+def test_admin_login_rejects_wrong_password_and_records_audit():
+    response = client.post("/api/auth/login", json={"username": "admin", "password": "wrong"})
+    assert response.status_code == 401
+
+    events = client.get("/api/security/audit-events?event_type=admin_login_failed", headers=admin_headers()).json()["items"]
+    assert events
+    assert events[0]["event_type"] == "admin_login_failed"
+    assert events[0]["severity"] == "warning"
 
 
 def test_seeded_module_center_contains_phase_one_pages():
@@ -470,7 +499,7 @@ def test_invalid_app_token_is_written_to_security_audit_log():
     )
 
     assert response.status_code == 401
-    events = client.get("/api/security/audit-events?event_type=app_auth_failed").json()["items"]
+    events = client.get("/api/security/audit-events?event_type=app_auth_failed", headers=admin_headers()).json()["items"]
     assert events
     assert events[0]["event_type"] == "app_auth_failed"
     assert events[0]["severity"] == "warning"
@@ -483,6 +512,7 @@ def test_app_key_can_be_created_used_once_returned_and_listed_without_secret():
 
     create_response = client.post(
         "/api/security/app-keys",
+        headers=admin_headers(),
         json={"name": "iOS App Production", "scopes": ["app:render"]},
     )
     assert create_response.status_code == 200
@@ -492,7 +522,7 @@ def test_app_key_can_be_created_used_once_returned_and_listed_without_secret():
     assert created["key"]["name"] == "iOS App Production"
     assert created["key"]["status"] == "active"
 
-    keys = client.get("/api/security/app-keys").json()["items"]
+    keys = client.get("/api/security/app-keys", headers=admin_headers()).json()["items"]
     assert any(item["id"] == created["key"]["id"] for item in keys)
     assert token not in str(keys)
     assert all("token_hash" not in item for item in keys)
@@ -509,10 +539,10 @@ def test_app_key_can_be_created_used_once_returned_and_listed_without_secret():
 def test_revoked_app_key_cannot_call_app_api_and_security_status_counts_it():
     module = client.get("/api/modules").json()["items"][0]
     client.post(f"/api/modules/{module['id']}/publish", json={"status": "live", "operator": "qa"})
-    created = client.post("/api/security/app-keys", json={"name": "Temporary Partner Key"}).json()
+    created = client.post("/api/security/app-keys", headers=admin_headers(), json={"name": "Temporary Partner Key"}).json()
     token = created["token"]
 
-    revoke_response = client.post(f"/api/security/app-keys/{created['key']['id']}/revoke", json={"operator": "admin"})
+    revoke_response = client.post(f"/api/security/app-keys/{created['key']['id']}/revoke", headers=admin_headers(), json={"operator": "admin"})
     assert revoke_response.status_code == 200
     assert revoke_response.json()["status"] == "revoked"
 
@@ -527,3 +557,11 @@ def test_revoked_app_key_cannot_call_app_api_and_security_status_counts_it():
     assert status["app_keys"]["revoked"] >= 1
     assert status["audit_events"]["total"] >= 1
     assert status["token_policy"]["using_default_dev_token"] is True
+
+
+def test_security_app_key_management_requires_admin_session():
+    response = client.post("/api/security/app-keys", json={"name": "No Session Key"})
+    assert response.status_code == 401
+
+    audit_response = client.get("/api/security/audit-events")
+    assert audit_response.status_code == 401

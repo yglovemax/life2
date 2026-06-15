@@ -16,6 +16,9 @@ let securityStatus = null;
 let appKeys = [];
 let auditEvents = [];
 let createdAppToken = "";
+let adminToken = localStorage.getItem("nexa_admin_token") || "";
+let adminUser = null;
+let consoleInitialized = false;
 
 const promptLabels = {
   shared_prefix: "共享静态前缀",
@@ -27,6 +30,9 @@ const promptLabels = {
 
 async function getJson(url, options) {
   const headers = { "Content-Type": "application/json", ...(options?.headers || {}) };
+  if (adminToken && !headers.Authorization) {
+    headers.Authorization = `Bearer ${adminToken}`;
+  }
   const response = await fetch(url, {
     ...options,
     headers,
@@ -95,6 +101,58 @@ function parseTags(selector) {
     .value.split(/[,，\n]/)
     .map((tag) => tag.trim())
     .filter(Boolean);
+}
+
+function setupAuthActions() {
+  document.querySelector("#loginButton").onclick = loginToConsole;
+  document.querySelector("#logoutButton").onclick = logoutConsole;
+  document.querySelector("#loginPassword").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") loginToConsole();
+  });
+}
+
+function showLogin(message = "") {
+  document.body.classList.add("auth-locked");
+  document.querySelector("#loginNotice").innerHTML = message ? `<div class="danger">${escapeHtml(message)}</div>` : "";
+  document.querySelector("#loginPassword").focus();
+}
+
+function showConsole() {
+  document.body.classList.remove("auth-locked");
+  document.querySelector("#adminIdentity").textContent = adminUser ? `${adminUser.username} · ${adminUser.role}` : "管理员";
+}
+
+async function loginToConsole() {
+  const notice = document.querySelector("#loginNotice");
+  try {
+    const username = document.querySelector("#loginUsername").value.trim();
+    const password = document.querySelector("#loginPassword").value;
+    if (!username || !password) throw new Error("请输入管理员账号和密码");
+    const result = await getJson("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    adminToken = result.token;
+    adminUser = result.user;
+    localStorage.setItem("nexa_admin_token", adminToken);
+    document.querySelector("#loginPassword").value = "";
+    showConsole();
+    await initializeConsole();
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function logoutConsole() {
+  try {
+    await getJson("/api/auth/logout", { method: "POST", body: JSON.stringify({}) });
+  } catch {
+    // Local session cleanup should still happen if the server token is already invalid.
+  }
+  adminToken = "";
+  adminUser = null;
+  localStorage.removeItem("nexa_admin_token");
+  showLogin("已退出，请重新登录");
 }
 
 async function loadMetrics() {
@@ -1008,6 +1066,8 @@ async function loadSecurityData() {
 function renderSecurityStatus() {
   if (!securityStatus) return;
   const cards = [
+    ["管理员", securityStatus.admin_auth?.users || 0],
+    ["后台会话", securityStatus.admin_auth?.active_sessions || 0],
     ["活跃 Key", securityStatus.app_keys.active],
     ["已撤销 Key", securityStatus.app_keys.revoked],
     ["审计事件", securityStatus.audit_events.total],
@@ -1094,7 +1154,12 @@ function auditEventCard(event) {
   </article>`;
 }
 
-async function boot() {
+async function initializeConsole() {
+  if (consoleInitialized) {
+    showConsole();
+    return;
+  }
+  consoleInitialized = true;
   setupNavigation();
   setupKnowledgeActions();
   setupCostActions();
@@ -1107,6 +1172,24 @@ async function boot() {
   await loadModules();
   renderTestCenter();
   await loadKnowledgeData();
+}
+
+async function boot() {
+  setupAuthActions();
+  if (!adminToken) {
+    showLogin();
+    return;
+  }
+  try {
+    adminUser = await getJson("/api/auth/me");
+    showConsole();
+    await initializeConsole();
+  } catch {
+    adminToken = "";
+    adminUser = null;
+    localStorage.removeItem("nexa_admin_token");
+    showLogin("登录已失效，请重新登录");
+  }
 }
 
 boot();

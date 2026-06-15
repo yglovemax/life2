@@ -34,6 +34,11 @@ class AppKeyStatus(str, Enum):
     revoked = "revoked"
 
 
+class AdminSessionStatus(str, Enum):
+    active = "active"
+    revoked = "revoked"
+
+
 class Page(Base):
     __tablename__ = "pages"
 
@@ -232,3 +237,27 @@ class AuditEvent(Base):
     status: Mapped[str] = mapped_column(String(40), default="ok")
     details: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AdminUser(Base):
+    __tablename__ = "admin_users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(240))
+    role: Mapped[str] = mapped_column(String(40), default="owner")
+    status: Mapped[str] = mapped_column(String(40), default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AdminSession(Base):
+    __tablename__ = "admin_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("admin_users.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(40), default=AdminSessionStatus.active.value)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

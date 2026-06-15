@@ -9,6 +9,9 @@ class Settings(BaseModel):
     database_url: str = "sqlite:///./data/nexa_admin.db"
     demo_mode: bool = True
     app_api_token: str = os.environ.get("NEXA_APP_API_TOKEN", "dev-app-token")
+    admin_username: str = os.environ.get("NEXA_ADMIN_USERNAME", "admin")
+    admin_password: str = os.environ.get("NEXA_ADMIN_PASSWORD", "admin123")
+    admin_auth_required: bool = os.environ.get("NEXA_ADMIN_AUTH_REQUIRED", "").lower() in {"1", "true", "yes", "on"}
 
     @property
     def sqlite_path(self) -> Path | None:

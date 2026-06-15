@@ -1,6 +1,28 @@
-# 安全审计与 App Key 管理
+# 安全审计、后台登录与 App Key 管理
 
-本项目第一版安全边界先覆盖外部 App API。后台管理接口暂时保持本地可用，后续生产部署前再加入后台登录、角色和操作审批。
+本项目第一版安全边界覆盖后台管理员登录、外部 App API、托管 App Key 和审计事件。高风险管理动作必须通过后台管理员会话访问。
+
+## 后台登录
+
+本地开发默认管理员账号：
+
+```text
+admin / admin123
+```
+
+生产环境部署前必须通过环境变量覆盖默认管理员用户名和密码：
+
+- `NEXA_ADMIN_USERNAME`
+- `NEXA_ADMIN_PASSWORD`
+
+后台登录成功后会生成 `adm_` 前缀的会话 token。浏览器控制台只在本地存储当前会话 token，登出后服务端会撤销该会话。
+
+当前已保护的后台接口：
+
+- `GET /api/security/app-keys`
+- `POST /api/security/app-keys`
+- `POST /api/security/app-keys/{key_id}/revoke`
+- `GET /api/security/audit-events`
 
 ## App Key
 
@@ -58,6 +80,8 @@ X-Nexa-Api-Key: <token>
 
 当前记录：
 
+- `admin_login_success`
+- `admin_login_failed`
 - `app_key_created`
 - `app_key_revoked`
 - `app_auth_failed`
@@ -69,6 +93,9 @@ X-Nexa-Api-Key: <token>
 ## API
 
 ```http
+POST /api/auth/login
+GET /api/auth/me
+POST /api/auth/logout
 GET /api/security/status
 GET /api/security/app-keys
 POST /api/security/app-keys
@@ -79,8 +106,13 @@ GET /api/security/audit-events
 创建 key 示例：
 
 ```bash
+ADMIN_SESSION="$(curl -s -X POST http://127.0.0.1:8812/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"admin123"}' | python -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+
 curl -X POST http://127.0.0.1:8812/api/security/app-keys \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $ADMIN_SESSION" \
   -d '{
     "name": "iOS App Production",
     "scopes": ["app:render"],

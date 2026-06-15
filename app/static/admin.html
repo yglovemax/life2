@@ -6,7 +6,25 @@
     <title>Nexa AI API Admin</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body>
+  <body class="auth-locked">
+    <section class="login-screen" id="loginScreen">
+      <div class="login-card">
+        <span class="brand-mark">N</span>
+        <p>Admin Access</p>
+        <h1>Nexa AI API 控制台</h1>
+        <div class="login-form">
+          <label>管理员账号
+            <input id="loginUsername" autocomplete="username" value="admin" />
+          </label>
+          <label>登录密码
+            <input id="loginPassword" autocomplete="current-password" type="password" placeholder="输入后台密码" />
+          </label>
+          <button class="primary" id="loginButton">登录控制台</button>
+          <div id="loginNotice"></div>
+        </div>
+      </div>
+    </section>
+
     <aside class="sidebar">
       <div class="brand">
         <span class="brand-mark">N</span>
@@ -32,7 +50,11 @@
           <p>Phase 1 Console</p>
           <h1>AI API 管理后台</h1>
         </div>
-        <div class="status-pill">星座 / 占星一期</div>
+        <div class="topbar-actions">
+          <div class="status-pill">星座 / 占星一期</div>
+          <div class="status-pill" id="adminIdentity">未登录</div>
+          <button class="secondary compact" id="logoutButton">退出</button>
+        </div>
       </header>
 
       <section class="metrics" id="metrics"></section>

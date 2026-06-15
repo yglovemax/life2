@@ -1,11 +1,16 @@
 import hashlib
+import hmac
 import secrets
+from datetime import timedelta
 from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.models import (
+    AdminSession,
+    AdminSessionStatus,
+    AdminUser,
     AppApiKey,
     AppKeyStatus,
     AuditEvent,
@@ -32,6 +37,8 @@ PROMPT_KEYS = [
 ]
 
 APP_ACTIVE_STATUSES = {ModuleStatus.gray.value, ModuleStatus.live.value}
+ADMIN_SESSION_DAYS = 7
+PASSWORD_ITERATIONS = 120000
 
 DEMO_TEST_USERS = [
     {
@@ -845,6 +852,120 @@ def module_release_snapshot(module: Module, payload: dict, action: str) -> dict:
     }
 
 
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), PASSWORD_ITERATIONS).hex()
+    return f"pbkdf2_sha256${PASSWORD_ITERATIONS}${salt}${digest}"
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    try:
+        algorithm, iterations, salt, expected = stored_hash.split("$", 3)
+        if algorithm != "pbkdf2_sha256":
+            return False
+        digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), int(iterations)).hex()
+    except (ValueError, TypeError):
+        return False
+    return hmac.compare_digest(digest, expected)
+
+
+def login_admin(session: Session, payload: dict) -> dict | None:
+    username = (payload.get("username") or "").strip()
+    password = payload.get("password") or ""
+    user = session.scalar(select(AdminUser).where(AdminUser.username == username))
+    if user is None or user.status != "active" or not verify_password(password, user.password_hash):
+        record_audit_event(
+            session,
+            event_type="admin_login_failed",
+            actor=username or "unknown",
+            target_type="admin_user",
+            target_id=username,
+            severity="warning",
+            status="blocked",
+            details={"username": username},
+        )
+        return None
+
+    token = generate_admin_token()
+    expires_at = utc_now() + timedelta(days=ADMIN_SESSION_DAYS)
+    admin_session = AdminSession(
+        user_id=user.id,
+        token_hash=hash_token(token),
+        status=AdminSessionStatus.active.value,
+        expires_at=expires_at,
+    )
+    user.last_login_at = utc_now()
+    session.add(admin_session)
+    session.commit()
+    session.refresh(user)
+    session.refresh(admin_session)
+    record_audit_event(
+        session,
+        event_type="admin_login_success",
+        actor=user.username,
+        target_type="admin_user",
+        target_id=str(user.id),
+        severity="info",
+        details={"role": user.role},
+    )
+    return {
+        "token": token,
+        "expires_at": admin_session.expires_at.isoformat(),
+        "user": serialize_admin_user(user),
+    }
+
+
+def authenticate_admin_token(session: Session, token: str) -> AdminUser | None:
+    if not token:
+        return None
+    admin_session = session.scalar(select(AdminSession).where(AdminSession.token_hash == hash_token(token)))
+    if admin_session is None or admin_session.status != AdminSessionStatus.active.value:
+        return None
+    if is_expired(admin_session.expires_at):
+        admin_session.status = AdminSessionStatus.revoked.value
+        admin_session.revoked_at = utc_now()
+        session.commit()
+        return None
+    user = session.get(AdminUser, admin_session.user_id)
+    if user is None or user.status != "active":
+        return None
+    return user
+
+
+def revoke_admin_token(session: Session, token: str) -> bool:
+    if not token:
+        return False
+    admin_session = session.scalar(select(AdminSession).where(AdminSession.token_hash == hash_token(token)))
+    if admin_session is None:
+        return False
+    admin_session.status = AdminSessionStatus.revoked.value
+    admin_session.revoked_at = utc_now()
+    session.commit()
+    return True
+
+
+def serialize_admin_user(user: AdminUser) -> dict:
+    return {
+        "id": user.id,
+        "username": user.username,
+        "role": user.role,
+        "status": user.status,
+        "created_at": user.created_at.isoformat(),
+        "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
+    }
+
+
+def generate_admin_token() -> str:
+    return f"adm_{secrets.token_urlsafe(32)}"
+
+
+def is_expired(value) -> bool:
+    now = utc_now()
+    if getattr(value, "tzinfo", None) is None:
+        now = now.replace(tzinfo=None)
+    return value <= now
+
+
 def create_app_api_key(session: Session, payload: dict) -> dict:
     token = generate_app_token()
     key = AppApiKey(
@@ -983,11 +1104,19 @@ def security_status(session: Session, default_token: str) -> dict:
     audit_count = session.scalar(select(func.count(AuditEvent.id))) or 0
     warning_count = session.scalar(select(func.count(AuditEvent.id)).where(AuditEvent.severity == "warning")) or 0
     failed_auth_count = session.scalar(select(func.count(AuditEvent.id)).where(AuditEvent.event_type == "app_auth_failed")) or 0
+    admin_count = session.scalar(select(func.count(AdminUser.id))) or 0
+    active_admin_sessions = session.scalar(
+        select(func.count(AdminSession.id)).where(AdminSession.status == AdminSessionStatus.active.value)
+    ) or 0
     return {
         "token_policy": {
             "using_default_dev_token": default_token == "dev-app-token",
             "managed_keys_enabled": True,
             "default_token_prefix": default_token[:4] + "***" if default_token else "",
+        },
+        "admin_auth": {
+            "users": admin_count,
+            "active_sessions": active_admin_sessions,
         },
         "app_keys": {
             "active": active_keys,

@@ -19,6 +19,7 @@ Phase 1 已完成第一版闭环：
 - App 页面级 / 模块级 JSON API
 - 正式调用与测试调用隔离
 - App Key 管理和安全审计
+- 后台登录、管理员会话和敏感接口保护
 
 ## 本地运行
 
@@ -33,6 +34,8 @@ uvicorn app.main:app --reload --port 8812
 
 - 后台页面：http://127.0.0.1:8812/admin
 - API 文档：http://127.0.0.1:8812/docs
+
+本地默认后台账号为 `admin / admin123`。生产部署前请覆盖 `NEXA_ADMIN_USERNAME` 和 `NEXA_ADMIN_PASSWORD`。
 
 App 对接说明见：`docs/app-api.md`
 安全审计说明见：`docs/security.md`

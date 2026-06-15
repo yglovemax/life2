@@ -25,11 +25,65 @@ body {
   color: var(--ink);
 }
 
+body.auth-locked {
+  display: block;
+  background:
+    linear-gradient(135deg, rgba(17, 24, 22, 0.92), rgba(39, 102, 93, 0.86)),
+    #111816;
+}
+
+body.auth-locked .sidebar,
+body.auth-locked .workspace {
+  display: none;
+}
+
+body:not(.auth-locked) .login-screen {
+  display: none;
+}
+
 button,
 select,
 textarea,
 input {
   font: inherit;
+}
+
+.login-screen {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+}
+
+.login-card {
+  width: min(460px, 100%);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 34px;
+  background: rgba(251, 250, 245, 0.96);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.26);
+}
+
+.login-card .brand-mark {
+  margin-bottom: 22px;
+}
+
+.login-card p {
+  margin: 0;
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.login-card h1 {
+  margin-top: 8px;
+  font-size: 30px;
+}
+
+.login-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 28px;
 }
 
 .sidebar {
@@ -96,6 +150,15 @@ input {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 20px;
+  gap: 16px;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 h1,
