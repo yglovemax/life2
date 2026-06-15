@@ -192,3 +192,60 @@ def test_update_module_replaces_prompt_fields_and_keeps_detail_consistent():
     assert data["fallback_content"] == "新备用"
     assert data["prompt"]["shared_prefix"] == "新共享"
     assert [field["field_name"] for field in data["fields"]] == ["title", "summary"]
+
+
+def test_test_center_exposes_demo_users():
+    response = client.get("/api/test-users")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["items"][0]["id"] == "demo_user_001"
+    assert "birth_profile" in data["items"][0]
+    assert "preferences" in data["items"][0]
+
+
+def test_batch_test_run_creates_trace_for_each_selected_module_with_model_override():
+    modules_response = client.get("/api/modules")
+    models_response = client.get("/api/models")
+    module_ids = [item["id"] for item in modules_response.json()["items"][:2]]
+    model_id = models_response.json()["items"][-1]["id"]
+    model_name = models_response.json()["items"][-1]["display_name"]
+
+    response = client.post(
+        "/api/test-runs/batch",
+        json={
+            "module_ids": module_ids,
+            "test_user": "demo_user_001",
+            "date": "2026-06-15",
+            "model_id": model_id,
+            "input_payload": {"sun_sign": "白羊座", "nickname": "max"},
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert [item["module_id"] for item in data["items"]] == module_ids
+    assert all(item["status"] == "ok" for item in data["items"])
+    assert all(item["model_name"] == model_name for item in data["items"])
+
+
+def test_call_trace_can_be_scored_and_keeps_review_notes():
+    module_id = client.get("/api/modules").json()["items"][0]["id"]
+    trace = client.post(
+        f"/api/modules/{module_id}/test-run",
+        json={
+            "test_user": "demo_user_001",
+            "date": "2026-06-15",
+            "input_payload": {"sun_sign": "白羊座"},
+        },
+    ).json()
+
+    response = client.put(
+        f"/api/call-traces/{trace['id']}/score",
+        json={"manual_score": 4, "reviewer_notes": "语气可用，字段完整。"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["manual_score"] == 4
+    assert data["reviewer_notes"] == "语气可用，字段完整。"

@@ -135,6 +135,8 @@ class CallTrace(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     estimated_cost_cents: Mapped[int] = mapped_column(Integer, default=0)
+    manual_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reviewer_notes: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     module: Mapped[Module] = relationship(back_populates="calls")

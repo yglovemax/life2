@@ -10,11 +10,15 @@ from app.seed import ensure_seed_data
 from app.services import (
     create_module,
     get_module_detail,
+    list_call_traces,
     list_models,
     list_modules,
     list_pages,
+    list_test_users,
     metrics,
+    run_batch_tests,
     run_module_test,
+    score_call_trace,
     update_module,
 )
 
@@ -71,6 +75,11 @@ def models(session: Session = Depends(get_session)) -> dict:
     return {"items": list_models(session)}
 
 
+@app.get("/api/test-users")
+def test_users() -> dict:
+    return {"items": list_test_users()}
+
+
 @app.post("/api/modules")
 def module_create(payload: dict, session: Session = Depends(get_session)) -> dict:
     return create_module(session, payload)
@@ -97,6 +106,24 @@ def module_test_run(module_id: int, payload: dict, session: Session = Depends(ge
     trace = run_module_test(session, module_id, payload)
     if trace is None:
         raise HTTPException(status_code=404, detail="module not found")
+    return trace
+
+
+@app.post("/api/test-runs/batch")
+def batch_test_run(payload: dict, session: Session = Depends(get_session)) -> dict:
+    return {"items": run_batch_tests(session, payload)}
+
+
+@app.get("/api/call-traces")
+def call_traces(session: Session = Depends(get_session)) -> dict:
+    return {"items": list_call_traces(session)}
+
+
+@app.put("/api/call-traces/{trace_id}/score")
+def call_trace_score(trace_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
+    trace = score_call_trace(session, trace_id, payload)
+    if trace is None:
+        raise HTTPException(status_code=404, detail="call trace not found")
     return trace
 
 

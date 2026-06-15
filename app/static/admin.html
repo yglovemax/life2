@@ -16,8 +16,8 @@
         </div>
       </div>
       <nav>
-        <button class="active">模块中心</button>
-        <button>测试中心</button>
+        <button class="active" data-view="modules">模块中心</button>
+        <button data-view="test-center">测试中心</button>
         <button>知识库</button>
         <button>成本中心</button>
         <button>发布中心</button>
@@ -36,7 +36,7 @@
 
       <section class="metrics" id="metrics"></section>
 
-      <section class="layout">
+      <section class="layout" id="moduleView">
         <section class="panel module-center">
           <div class="panel-head">
             <div>
@@ -70,6 +70,65 @@
 
         <section class="panel detail" id="detailPanel">
           <div class="empty">选择一个模块查看 Prompt、字段契约和调用追踪。</div>
+        </section>
+      </section>
+
+      <section class="layout hidden" id="testCenterView">
+        <section class="panel module-center">
+          <div class="panel-head">
+            <div>
+              <p>Test Center</p>
+              <h2>测试中心</h2>
+            </div>
+            <button class="primary compact" id="runBatchButton">批量测试</button>
+          </div>
+          <div class="detail-body">
+            <div class="form-grid">
+              <label>页面
+                <select id="testPage"></select>
+              </label>
+              <label>模型
+                <select id="testModel"></select>
+              </label>
+              <label>测试用户
+                <select id="testUser"></select>
+              </label>
+              <label>日期
+                <input id="testDate" type="date" />
+              </label>
+              <label class="wide">测试输入 JSON
+                <textarea id="testPayload"></textarea>
+              </label>
+            </div>
+            <section class="section">
+              <div class="panel-head inline-head">
+                <div><p>Modules</p><h3>选择测试模块</h3></div>
+                <button class="secondary compact" id="runSingleButton">单模块测试</button>
+              </div>
+              <div class="module-checks" id="testModuleChecks"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel detail">
+          <div class="panel-head">
+            <div>
+              <p>Outputs</p>
+              <h2>结果与评分</h2>
+            </div>
+            <button class="secondary compact" id="refreshTracesButton">刷新</button>
+          </div>
+          <div class="detail-body">
+            <div id="testNotice"></div>
+            <section>
+              <h3>本次结果</h3>
+              <div id="testResults" class="trace-list"><p class="empty">还没有测试结果。</p></div>
+            </section>
+            <section class="section">
+              <h3>最近调用记录</h3>
+              <div id="recentTraceList" class="trace-list"></div>
+            </section>
+          </div>
         </section>
       </section>
     </main>

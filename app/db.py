@@ -1,5 +1,5 @@
 from collections.abc import Generator
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.settings import get_settings
@@ -31,3 +31,23 @@ def init_db() -> None:
     from app import models  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
+    ensure_sqlite_columns()
+
+
+def ensure_sqlite_columns() -> None:
+    if not settings.database_url.startswith("sqlite"):
+        return
+    inspector = inspect(engine)
+    if "call_traces" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("call_traces")}
+    statements = []
+    if "manual_score" not in existing:
+        statements.append("ALTER TABLE call_traces ADD COLUMN manual_score INTEGER")
+    if "reviewer_notes" not in existing:
+        statements.append("ALTER TABLE call_traces ADD COLUMN reviewer_notes TEXT DEFAULT ''")
+    if not statements:
+        return
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.execute(text(statement))

@@ -12,6 +12,43 @@ PROMPT_KEYS = [
     "final_request_template",
 ]
 
+DEMO_TEST_USERS = [
+    {
+        "id": "demo_user_001",
+        "name": "Max / 白羊样本",
+        "birth_profile": {
+            "nickname": "max",
+            "birth_date": "1989-09-29",
+            "birth_time": "16:00",
+            "birth_city": "兰州",
+            "sun_sign": "天秤座",
+            "moon_sign": "处女座",
+            "rising_sign": "摩羯座",
+        },
+        "preferences": {
+            "tone": "温暖、清晰、不过度玄学化",
+            "density": "中等",
+        },
+    },
+    {
+        "id": "demo_user_002",
+        "name": "Ava / 日运样本",
+        "birth_profile": {
+            "nickname": "Ava",
+            "birth_date": "1996-04-12",
+            "birth_time": "09:30",
+            "birth_city": "上海",
+            "sun_sign": "白羊座",
+            "moon_sign": "巨蟹座",
+            "rising_sign": "双子座",
+        },
+        "preferences": {
+            "tone": "直接、有行动建议",
+            "density": "低",
+        },
+    },
+]
+
 
 def list_modules(session: Session) -> list[dict]:
     modules = session.scalars(
@@ -73,6 +110,10 @@ def list_models(session: Session) -> list[dict]:
         }
         for model in models
     ]
+
+
+def list_test_users() -> list[dict]:
+    return DEMO_TEST_USERS
 
 
 def get_module_detail(session: Session, module_id: int) -> dict | None:
@@ -244,6 +285,8 @@ def serialize_call(call: CallTrace) -> dict:
         "input_tokens": call.input_tokens,
         "output_tokens": call.output_tokens,
         "estimated_cost_cents": call.estimated_cost_cents,
+        "manual_score": call.manual_score,
+        "reviewer_notes": call.reviewer_notes,
         "created_at": call.created_at.isoformat(),
     }
 
@@ -258,6 +301,11 @@ def run_module_test(session: Session, module_id: int, payload: dict) -> dict | N
         return None
 
     prompt = module.prompt or PromptTemplate(module_id=module.id)
+    model_name = module.model.display_name if module.model else "未配置"
+    if payload.get("model_id"):
+        override_model = session.get(ModelConfig, int(payload["model_id"]))
+        if override_model is not None:
+            model_name = override_model.display_name
     input_payload = payload.get("input_payload") or {}
     model_request = "\n\n".join(
         [
@@ -292,7 +340,7 @@ def run_module_test(session: Session, module_id: int, payload: dict) -> dict | N
         status="ok",
         fallback_triggered=False,
         prompt_version=prompt.version,
-        model_name=module.model.display_name if module.model else "未配置",
+        model_name=model_name,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
         estimated_cost_cents=estimate_cost_cents(input_tokens, output_tokens),
@@ -301,6 +349,32 @@ def run_module_test(session: Session, module_id: int, payload: dict) -> dict | N
     session.commit()
     session.refresh(trace)
     return serialize_call(trace)
+
+
+def run_batch_tests(session: Session, payload: dict) -> list[dict]:
+    traces = []
+    for module_id in payload.get("module_ids") or []:
+        trace = run_module_test(session, int(module_id), payload)
+        if trace is not None:
+            traces.append(trace)
+    return traces
+
+
+def score_call_trace(session: Session, trace_id: int, payload: dict) -> dict | None:
+    trace = session.get(CallTrace, trace_id)
+    if trace is None:
+        return None
+    score = payload.get("manual_score")
+    trace.manual_score = int(score) if score is not None else None
+    trace.reviewer_notes = payload.get("reviewer_notes") or ""
+    session.commit()
+    session.refresh(trace)
+    return serialize_call(trace)
+
+
+def list_call_traces(session: Session, limit: int = 20) -> list[dict]:
+    traces = session.scalars(select(CallTrace).order_by(CallTrace.created_at.desc()).limit(limit)).all()
+    return [serialize_call(trace) for trace in traces]
 
 
 def estimate_cost_cents(input_tokens: int, output_tokens: int) -> int:

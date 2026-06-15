@@ -1,9 +1,11 @@
 let modules = [];
 let pages = [];
 let modelConfigs = [];
+let testUsers = [];
 let selectedModuleId = null;
 let currentDetail = null;
 let draftFields = [];
+let latestTestResults = [];
 
 const promptLabels = {
   shared_prefix: "共享静态前缀",
@@ -85,9 +87,10 @@ async function loadMetrics() {
 }
 
 async function loadMetadata() {
-  const [pageData, modelData] = await Promise.all([getJson("/api/pages"), getJson("/api/models")]);
+  const [pageData, modelData, testUserData] = await Promise.all([getJson("/api/pages"), getJson("/api/models"), getJson("/api/test-users")]);
   pages = pageData.items;
   modelConfigs = modelData.items;
+  testUsers = testUserData.items;
 }
 
 async function loadModules() {
@@ -374,6 +377,11 @@ function traceCard(trace) {
   return `<article class="trace-card">
     <span>#${trace.id} · ${trace.status} · ${escapeHtml(trace.model_name)}</span>
     <pre>${escapeHtml(JSON.stringify(trace.final_json, null, 2))}</pre>
+    <div class="score-row">
+      <input id="score_${trace.id}" type="number" min="1" max="5" value="${trace.manual_score || ""}" placeholder="1-5 分" />
+      <input id="notes_${trace.id}" value="${escapeHtml(trace.reviewer_notes || "")}" placeholder="人工评分备注" />
+      <button class="secondary compact" onclick="scoreTrace(${trace.id})">保存评分</button>
+    </div>
   </article>`;
 }
 
@@ -402,11 +410,161 @@ function copyRequestPreview() {
   navigator.clipboard.writeText(text);
 }
 
+function setupNavigation() {
+  document.querySelectorAll("[data-view]").forEach((button) => {
+    button.onclick = () => showView(button.dataset.view);
+  });
+}
+
+function showView(view) {
+  document.querySelectorAll("[data-view]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.view === view);
+  });
+  document.querySelector("#moduleView").classList.toggle("hidden", view !== "modules");
+  document.querySelector("#testCenterView").classList.toggle("hidden", view !== "test-center");
+  if (view === "test-center") renderTestCenter();
+}
+
+function renderTestCenter() {
+  renderTestControls();
+  renderTestModules();
+  loadRecentTraces();
+}
+
+function renderTestControls() {
+  const pageSelect = document.querySelector("#testPage");
+  const selectedPage = pageSelect.value || String(pages[0]?.id || "");
+  pageSelect.innerHTML = pages.map((page) => `<option value="${page.id}">${escapeHtml(page.name)}</option>`).join("");
+  pageSelect.value = selectedPage;
+  pageSelect.onchange = renderTestModules;
+
+  const modelSelect = document.querySelector("#testModel");
+  const selectedModel = modelSelect.value || String(modelConfigs[0]?.id || "");
+  modelSelect.innerHTML = modelConfigs.map((model) => `<option value="${model.id}">${escapeHtml(model.display_name)}</option>`).join("");
+  modelSelect.value = selectedModel;
+
+  const userSelect = document.querySelector("#testUser");
+  const selectedUser = userSelect.value || testUsers[0]?.id || "";
+  userSelect.innerHTML = testUsers.map((user) => `<option value="${user.id}">${escapeHtml(user.name)}</option>`).join("");
+  userSelect.value = selectedUser;
+  userSelect.onchange = fillTestPayloadFromUser;
+
+  const dateInput = document.querySelector("#testDate");
+  if (!dateInput.value) dateInput.value = new Date().toISOString().slice(0, 10);
+  if (!document.querySelector("#testPayload").value.trim()) fillTestPayloadFromUser();
+
+  document.querySelector("#runSingleButton").onclick = () => runTestCenter("single");
+  document.querySelector("#runBatchButton").onclick = () => runTestCenter("batch");
+  document.querySelector("#refreshTracesButton").onclick = loadRecentTraces;
+}
+
+function fillTestPayloadFromUser() {
+  const user = testUsers.find((item) => item.id === document.querySelector("#testUser").value) || testUsers[0];
+  document.querySelector("#testPayload").value = safeJson({
+    ...(user?.birth_profile || {}),
+    preferences: user?.preferences || {},
+    source: "test_center",
+  });
+}
+
+function renderTestModules() {
+  const pageId = Number(document.querySelector("#testPage").value || pages[0]?.id);
+  const page = pages.find((item) => item.id === pageId);
+  const rows = modules.filter((module) => !page || module.page_name === page.name);
+  document.querySelector("#testModuleChecks").innerHTML = rows
+    .map(
+      (module, index) => `<label class="module-check">
+        <input type="checkbox" value="${module.id}" ${index === 0 ? "checked" : ""} />
+        <span><strong>${escapeHtml(module.name)}</strong><br><small>${escapeHtml(module.slug)} · ${escapeHtml(module.model)}</small></span>
+      </label>`
+    )
+    .join("");
+}
+
+function selectedTestModuleIds() {
+  return [...document.querySelectorAll("#testModuleChecks input:checked")].map((input) => Number(input.value));
+}
+
+function testPayloadBase() {
+  return {
+    test_user: document.querySelector("#testUser").value,
+    date: document.querySelector("#testDate").value,
+    model_id: Number(document.querySelector("#testModel").value),
+    input_payload: parseJsonInput("#testPayload", {}),
+  };
+}
+
+async function runTestCenter(mode) {
+  const notice = document.querySelector("#testNotice");
+  try {
+    const moduleIds = selectedTestModuleIds();
+    if (!moduleIds.length) throw new Error("请至少选择一个模块");
+    const payload = { ...testPayloadBase(), module_ids: mode === "single" ? [moduleIds[0]] : moduleIds };
+    const response = await getJson("/api/test-runs/batch", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    latestTestResults = response.items;
+    notice.innerHTML = `<div class="notice">已生成 ${latestTestResults.length} 条测试结果</div>`;
+    renderTestResults();
+    await loadMetrics();
+    await loadModules();
+    await loadRecentTraces();
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderTestResults() {
+  const container = document.querySelector("#testResults");
+  if (!latestTestResults.length) {
+    container.innerHTML = '<p class="empty">还没有测试结果。</p>';
+    return;
+  }
+  container.innerHTML = `${comparisonPanel(latestTestResults)}${latestTestResults.map(traceCard).join("")}`;
+}
+
+function comparisonPanel(results) {
+  if (results.length < 2) return "";
+  const left = results[0];
+  const right = results[1];
+  return `<article class="trace-card">
+    <span>结果对比 · #${left.id} / #${right.id}</span>
+    <div class="compare-grid">
+      <pre>${escapeHtml(JSON.stringify(left.final_json, null, 2))}</pre>
+      <pre>${escapeHtml(JSON.stringify(right.final_json, null, 2))}</pre>
+    </div>
+  </article>`;
+}
+
+async function loadRecentTraces() {
+  const data = await getJson("/api/call-traces");
+  document.querySelector("#recentTraceList").innerHTML = data.items.length ? data.items.map(traceCard).join("") : '<p class="empty">暂无调用记录。</p>';
+}
+
+async function scoreTrace(traceId) {
+  const score = document.querySelector(`#score_${traceId}`).value;
+  const notes = document.querySelector(`#notes_${traceId}`).value;
+  const saved = await getJson(`/api/call-traces/${traceId}/score`, {
+    method: "PUT",
+    body: JSON.stringify({
+      manual_score: score ? Number(score) : null,
+      reviewer_notes: notes,
+    }),
+  });
+  document.querySelector("#testNotice").innerHTML = `<div class="notice">#${saved.id} 评分已保存</div>`;
+  latestTestResults = latestTestResults.map((trace) => (trace.id === saved.id ? saved : trace));
+  renderTestResults();
+  await loadRecentTraces();
+}
+
 async function boot() {
+  setupNavigation();
   document.querySelector("#createModuleButton").onclick = newModuleDraft;
   await loadMetadata();
   await loadMetrics();
   await loadModules();
+  renderTestCenter();
 }
 
 boot();
