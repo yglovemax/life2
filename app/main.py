@@ -13,16 +13,23 @@ from app.services import (
     authenticate_admin_token,
     authenticate_app_token,
     cost_summary,
+    append_chat_message,
+    create_chat_session,
     create_issue,
     create_knowledge_source,
     create_app_api_key,
+    create_memory_item,
     create_manual_knowledge_entry,
     create_model_provider_key,
     create_module,
+    create_or_update_app_user,
     create_output_policy,
     create_training_run,
+    get_app_user,
+    get_chat_session,
     get_module_detail,
     get_training_run,
+    get_user_chart,
     import_github_knowledge_sources,
     list_app_api_keys,
     list_audit_events,
@@ -57,9 +64,12 @@ from app.services import (
     search_knowledge,
     security_status,
     serialize_admin_user,
+    save_birth_profile,
+    list_user_memories,
     update_module,
     update_output_policy,
     update_issue,
+    upsert_memory_summary,
     upload_knowledge_files,
 )
 
@@ -203,6 +213,146 @@ def app_page_render(
         details={"request_id": rendered["request_id"], "module_count": rendered["meta"]["module_count"]},
     )
     return rendered
+
+
+@app.post("/api/app/users")
+def app_user_create(
+    payload: dict,
+    app_auth: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    try:
+        user = create_or_update_app_user(session, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    record_audit_event(
+        session,
+        event_type="app_user_upsert",
+        actor=app_auth["name"],
+        target_type="app_user",
+        target_id=str(user["id"]),
+        severity="info",
+        details={"external_id": user["external_id"]},
+    )
+    return user
+
+
+@app.get("/api/app/users/{user_id}")
+def app_user_detail(
+    user_id: int,
+    _: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    user = get_app_user(session, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="app user not found")
+    return user
+
+
+@app.put("/api/app/users/{user_id}/birth-profile")
+def app_user_birth_profile_save(
+    user_id: int,
+    payload: dict,
+    _: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    profile = save_birth_profile(session, user_id, payload)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="app user not found")
+    return profile
+
+
+@app.get("/api/app/users/{user_id}/chart")
+def app_user_chart(
+    user_id: int,
+    _: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    chart = get_user_chart(session, user_id)
+    if chart is None:
+        raise HTTPException(status_code=404, detail="app user not found")
+    return chart
+
+
+@app.post("/api/app/chat/sessions")
+def app_chat_session_create(
+    payload: dict,
+    _: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    chat_session = create_chat_session(session, payload)
+    if chat_session is None:
+        raise HTTPException(status_code=404, detail="app user not found")
+    return chat_session
+
+
+@app.get("/api/app/chat/sessions/{session_id}")
+def app_chat_session_detail(
+    session_id: int,
+    _: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    chat_session = get_chat_session(session, session_id)
+    if chat_session is None:
+        raise HTTPException(status_code=404, detail="chat session not found")
+    return chat_session
+
+
+@app.post("/api/app/chat/sessions/{session_id}/messages")
+def app_chat_session_message_create(
+    session_id: int,
+    payload: dict,
+    _: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    try:
+        message = append_chat_message(session, session_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if message is None:
+        raise HTTPException(status_code=404, detail="chat session not found")
+    return message
+
+
+@app.put("/api/app/users/{user_id}/memory-summary")
+def app_user_memory_summary_save(
+    user_id: int,
+    payload: dict,
+    _: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    summary = upsert_memory_summary(session, user_id, payload)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="app user not found")
+    return summary
+
+
+@app.post("/api/app/users/{user_id}/memories")
+def app_user_memory_create(
+    user_id: int,
+    payload: dict,
+    _: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    try:
+        item = create_memory_item(session, user_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if item is None:
+        raise HTTPException(status_code=404, detail="app user not found")
+    return item
+
+
+@app.get("/api/app/users/{user_id}/memories")
+def app_user_memories(
+    user_id: int,
+    _: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    memories = list_user_memories(session, user_id)
+    if memories is None:
+        raise HTTPException(status_code=404, detail="app user not found")
+    return memories
 
 
 @app.get("/api/modules")

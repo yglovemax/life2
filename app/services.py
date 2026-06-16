@@ -6,7 +6,7 @@ import json
 import secrets
 import urllib.error
 import urllib.request
-from datetime import timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -29,14 +29,19 @@ from app.models import (
     AdminSessionStatus,
     AdminUser,
     AppApiKey,
+    AppUser,
     AppKeyStatus,
     AuditEvent,
+    BirthProfile,
     CallTrace,
+    ChatMessage,
+    ChatSession,
     FieldContract,
     Issue,
     IssueStatus,
     KnowledgeChunk,
     KnowledgeSource,
+    MemoryItem,
     ModelConfig,
     ModelProviderKey,
     ModelProviderKeyStatus,
@@ -48,6 +53,7 @@ from app.models import (
     PromptTemplate,
     TrainingDraftChunk,
     TrainingRun,
+    UserMemorySummary,
     utc_now,
 )
 
@@ -1299,6 +1305,318 @@ def list_call_traces(session: Session, limit: int = 20, request_type: str | None
         statement = select(CallTrace).where(CallTrace.request_type == request_type).order_by(CallTrace.created_at.desc()).limit(limit)
     traces = session.scalars(statement).all()
     return [serialize_call(trace) for trace in traces]
+
+
+def create_or_update_app_user(session: Session, payload: dict) -> dict:
+    external_id = (payload.get("external_id") or "").strip()
+    if not external_id:
+        raise ValueError("external_id is required")
+    user = session.scalar(select(AppUser).where(AppUser.external_id == external_id))
+    if user is None:
+        user = AppUser(external_id=external_id)
+        session.add(user)
+    user.nickname = (payload.get("nickname") or user.nickname or "").strip()
+    user.locale = (payload.get("locale") or user.locale or "zh-CN").strip()
+    user.timezone = (payload.get("timezone") or user.timezone or "Asia/Shanghai").strip()
+    user.status = (payload.get("status") or user.status or "active").strip()
+    if isinstance(payload.get("profile"), dict):
+        user.profile = payload["profile"]
+    session.commit()
+    session.refresh(user)
+    return serialize_app_user(user)
+
+
+def get_app_user(session: Session, user_id: int) -> dict | None:
+    user = session.get(AppUser, user_id)
+    return serialize_app_user(user) if user else None
+
+
+def save_birth_profile(session: Session, user_id: int, payload: dict) -> dict | None:
+    user = session.get(AppUser, user_id)
+    if user is None:
+        return None
+    profile = session.scalar(select(BirthProfile).where(BirthProfile.user_id == user.id))
+    if profile is None:
+        profile = BirthProfile(user_id=user.id)
+        session.add(profile)
+    profile.nickname = (payload.get("nickname") or profile.nickname or user.nickname or "").strip()
+    profile.birth_date = (payload.get("birth_date") or profile.birth_date or "").strip()
+    profile.birth_time = (payload.get("birth_time") or profile.birth_time or "").strip()
+    profile.birth_city = (payload.get("birth_city") or profile.birth_city or "").strip()
+    profile.birth_country = (payload.get("birth_country") or profile.birth_country or "").strip()
+    profile.birth_timezone = (payload.get("birth_timezone") or payload.get("timezone") or profile.birth_timezone or user.timezone).strip()
+    profile.latitude = str(payload.get("latitude") or profile.latitude or "").strip()
+    profile.longitude = str(payload.get("longitude") or profile.longitude or "").strip()
+    profile.raw_payload = payload
+    profile.chart_snapshot = build_chart_snapshot(profile)
+    session.commit()
+    session.refresh(profile)
+    return serialize_birth_profile(profile)
+
+
+def get_user_chart(session: Session, user_id: int) -> dict | None:
+    user = session.get(AppUser, user_id)
+    if user is None:
+        return None
+    profile = session.scalar(select(BirthProfile).where(BirthProfile.user_id == user.id))
+    warnings: list[str] = []
+    if profile is None:
+        warnings.append("用户还没有保存本命资料。")
+        return {
+            "user_id": user.id,
+            "birth_profile": None,
+            "chart_snapshot": {},
+            "warnings": warnings,
+        }
+    snapshot = profile.chart_snapshot or build_chart_snapshot(profile)
+    warnings.extend(snapshot.get("warnings") or [])
+    return {
+        "user_id": user.id,
+        "birth_profile": serialize_birth_profile(profile),
+        "chart_snapshot": snapshot,
+        "warnings": warnings,
+    }
+
+
+def build_chart_snapshot(profile: BirthProfile) -> dict:
+    warnings = ["当前版本为后端基础盘面快照，只计算太阳星座；完整宫位、上升、相位将在星盘计算服务阶段接入。"]
+    sun_sign = sun_sign_from_birth_date(profile.birth_date)
+    if not sun_sign:
+        warnings.append("birth_date 无法解析，暂不能计算太阳星座。")
+    if not profile.birth_time:
+        warnings.append("缺少出生时间，后续无法精确计算上升和宫位。")
+    if not profile.latitude or not profile.longitude:
+        warnings.append("缺少出生地经纬度，后续无法精确计算宫位。")
+    return {
+        "calculation_level": "sun_sign_only",
+        "sun_sign": sun_sign,
+        "birth_datetime": " ".join(part for part in [profile.birth_date, profile.birth_time] if part),
+        "birth_city": profile.birth_city,
+        "birth_timezone": profile.birth_timezone,
+        "warnings": warnings,
+    }
+
+
+def sun_sign_from_birth_date(value: str) -> str:
+    try:
+        parsed = date.fromisoformat(str(value or "").strip())
+    except ValueError:
+        return ""
+    month_day = (parsed.month, parsed.day)
+    signs = [
+        ("摩羯座", (1, 1), (1, 19)),
+        ("水瓶座", (1, 20), (2, 18)),
+        ("双鱼座", (2, 19), (3, 20)),
+        ("白羊座", (3, 21), (4, 19)),
+        ("金牛座", (4, 20), (5, 20)),
+        ("双子座", (5, 21), (6, 21)),
+        ("巨蟹座", (6, 22), (7, 22)),
+        ("狮子座", (7, 23), (8, 22)),
+        ("处女座", (8, 23), (9, 22)),
+        ("天秤座", (9, 23), (10, 23)),
+        ("天蝎座", (10, 24), (11, 22)),
+        ("射手座", (11, 23), (12, 21)),
+        ("摩羯座", (12, 22), (12, 31)),
+    ]
+    for sign, start, end in signs:
+        if start <= month_day <= end:
+            return sign
+    return ""
+
+
+def create_chat_session(session: Session, payload: dict) -> dict | None:
+    user = session.get(AppUser, nullable_int(payload.get("user_id")) or 0)
+    if user is None:
+        return None
+    chat_session = ChatSession(
+        user_id=user.id,
+        title=(payload.get("title") or "新的咨询").strip(),
+        topic=(payload.get("topic") or "").strip(),
+        status=(payload.get("status") or "active").strip(),
+        metadata_json=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
+    )
+    session.add(chat_session)
+    session.commit()
+    session.refresh(chat_session)
+    return serialize_chat_session(chat_session, include_messages=True)
+
+
+def get_chat_session(session: Session, session_id: int) -> dict | None:
+    chat_session = session.scalar(
+        select(ChatSession)
+        .where(ChatSession.id == session_id)
+        .options(selectinload(ChatSession.messages), joinedload(ChatSession.user))
+    )
+    return serialize_chat_session(chat_session, include_messages=True) if chat_session else None
+
+
+def append_chat_message(session: Session, session_id: int, payload: dict) -> dict | None:
+    chat_session = session.get(ChatSession, session_id)
+    if chat_session is None:
+        return None
+    role = (payload.get("role") or "user").strip()
+    if role not in {"user", "assistant", "system", "tool"}:
+        raise ValueError("message role is invalid")
+    content = str(payload.get("content") or "").strip()
+    if not content:
+        raise ValueError("message content is required")
+    message = ChatMessage(
+        session_id=chat_session.id,
+        user_id=chat_session.user_id,
+        role=role,
+        content=content,
+        metadata_json=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
+        token_count=max(1, len(content) // 4),
+    )
+    chat_session.updated_at = utc_now()
+    session.add(message)
+    session.commit()
+    session.refresh(message)
+    return serialize_chat_message(message)
+
+
+def upsert_memory_summary(session: Session, user_id: int, payload: dict) -> dict | None:
+    user = session.get(AppUser, user_id)
+    if user is None:
+        return None
+    summary = session.scalar(select(UserMemorySummary).where(UserMemorySummary.user_id == user.id))
+    if summary is None:
+        summary = UserMemorySummary(user_id=user.id)
+        session.add(summary)
+    else:
+        summary.version += 1
+    summary.summary = str(payload.get("summary") or "").strip()
+    summary.metadata_json = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    session.commit()
+    session.refresh(summary)
+    return serialize_memory_summary(summary)
+
+
+def create_memory_item(session: Session, user_id: int, payload: dict) -> dict | None:
+    user = session.get(AppUser, user_id)
+    if user is None:
+        return None
+    content = str(payload.get("content") or "").strip()
+    if not content:
+        raise ValueError("memory content is required")
+    item = MemoryItem(
+        user_id=user.id,
+        source_session_id=nullable_int(payload.get("source_session_id")),
+        memory_type=(payload.get("memory_type") or "preference").strip(),
+        content=content,
+        tags=normalize_tags(payload.get("tags") or []),
+        importance=clamp_int(payload.get("importance"), 1, 5, 3),
+        status=(payload.get("status") or "active").strip(),
+    )
+    session.add(item)
+    session.commit()
+    session.refresh(item)
+    return serialize_memory_item(item)
+
+
+def list_user_memories(session: Session, user_id: int) -> dict | None:
+    user = session.get(AppUser, user_id)
+    if user is None:
+        return None
+    summary = session.scalar(select(UserMemorySummary).where(UserMemorySummary.user_id == user.id))
+    items = session.scalars(
+        select(MemoryItem)
+        .where(MemoryItem.user_id == user.id, MemoryItem.status == "active")
+        .order_by(MemoryItem.importance.desc(), MemoryItem.updated_at.desc(), MemoryItem.id.desc())
+    ).all()
+    return {
+        "user_id": user.id,
+        "summary": serialize_memory_summary(summary) if summary else None,
+        "items": [serialize_memory_item(item) for item in items],
+    }
+
+
+def serialize_app_user(user: AppUser) -> dict:
+    return {
+        "id": user.id,
+        "external_id": user.external_id,
+        "nickname": user.nickname,
+        "locale": user.locale,
+        "timezone": user.timezone,
+        "status": user.status,
+        "profile": user.profile or {},
+        "created_at": user.created_at.isoformat(),
+        "updated_at": user.updated_at.isoformat(),
+    }
+
+
+def serialize_birth_profile(profile: BirthProfile) -> dict:
+    return {
+        "id": profile.id,
+        "user_id": profile.user_id,
+        "nickname": profile.nickname,
+        "birth_date": profile.birth_date,
+        "birth_time": profile.birth_time,
+        "birth_city": profile.birth_city,
+        "birth_country": profile.birth_country,
+        "birth_timezone": profile.birth_timezone,
+        "latitude": profile.latitude,
+        "longitude": profile.longitude,
+        "chart_snapshot": profile.chart_snapshot or {},
+        "created_at": profile.created_at.isoformat(),
+        "updated_at": profile.updated_at.isoformat(),
+    }
+
+
+def serialize_chat_session(chat_session: ChatSession, include_messages: bool = False) -> dict:
+    data = {
+        "id": chat_session.id,
+        "user_id": chat_session.user_id,
+        "title": chat_session.title,
+        "topic": chat_session.topic,
+        "status": chat_session.status,
+        "metadata": chat_session.metadata_json or {},
+        "created_at": chat_session.created_at.isoformat(),
+        "updated_at": chat_session.updated_at.isoformat(),
+    }
+    if include_messages:
+        data["messages"] = [serialize_chat_message(message) for message in sorted(chat_session.messages, key=lambda item: item.id)]
+    return data
+
+
+def serialize_chat_message(message: ChatMessage) -> dict:
+    return {
+        "id": message.id,
+        "session_id": message.session_id,
+        "user_id": message.user_id,
+        "role": message.role,
+        "content": message.content,
+        "metadata": message.metadata_json or {},
+        "token_count": message.token_count,
+        "created_at": message.created_at.isoformat(),
+    }
+
+
+def serialize_memory_summary(summary: UserMemorySummary) -> dict:
+    return {
+        "id": summary.id,
+        "user_id": summary.user_id,
+        "summary": summary.summary,
+        "version": summary.version,
+        "metadata": summary.metadata_json or {},
+        "created_at": summary.created_at.isoformat(),
+        "updated_at": summary.updated_at.isoformat(),
+    }
+
+
+def serialize_memory_item(item: MemoryItem) -> dict:
+    return {
+        "id": item.id,
+        "user_id": item.user_id,
+        "source_session_id": item.source_session_id,
+        "memory_type": item.memory_type,
+        "content": item.content,
+        "tags": item.tags or [],
+        "importance": item.importance,
+        "status": item.status,
+        "created_at": item.created_at.isoformat(),
+        "updated_at": item.updated_at.isoformat(),
+    }
 
 
 def render_app_module(session: Session, module_slug: str, payload: dict, request_id: str | None = None) -> dict | None:

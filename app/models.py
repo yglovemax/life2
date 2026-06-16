@@ -289,6 +289,110 @@ class TrainingDraftChunk(Base):
     run: Mapped[TrainingRun] = relationship(back_populates="draft_chunks")
 
 
+class AppUser(Base):
+    __tablename__ = "app_users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    external_id: Mapped[str] = mapped_column(String(160), unique=True, index=True)
+    nickname: Mapped[str] = mapped_column(String(120), default="")
+    locale: Mapped[str] = mapped_column(String(40), default="zh-CN")
+    timezone: Mapped[str] = mapped_column(String(80), default="Asia/Shanghai")
+    status: Mapped[str] = mapped_column(String(40), default="active", index=True)
+    profile: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    birth_profile: Mapped[BirthProfile | None] = relationship(back_populates="user", cascade="all, delete-orphan")
+    chat_sessions: Mapped[list[ChatSession]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    memory_summary: Mapped[UserMemorySummary | None] = relationship(back_populates="user", cascade="all, delete-orphan")
+    memory_items: Mapped[list[MemoryItem]] = relationship(back_populates="user", cascade="all, delete-orphan")
+
+
+class BirthProfile(Base):
+    __tablename__ = "birth_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("app_users.id"), unique=True, index=True)
+    nickname: Mapped[str] = mapped_column(String(120), default="")
+    birth_date: Mapped[str] = mapped_column(String(40), default="")
+    birth_time: Mapped[str] = mapped_column(String(40), default="")
+    birth_city: Mapped[str] = mapped_column(String(120), default="")
+    birth_country: Mapped[str] = mapped_column(String(80), default="")
+    birth_timezone: Mapped[str] = mapped_column(String(80), default="")
+    latitude: Mapped[str] = mapped_column(String(40), default="")
+    longitude: Mapped[str] = mapped_column(String(40), default="")
+    raw_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    chart_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    user: Mapped[AppUser] = relationship(back_populates="birth_profile")
+
+
+class ChatSession(Base):
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("app_users.id"), index=True)
+    title: Mapped[str] = mapped_column(String(180), default="")
+    topic: Mapped[str] = mapped_column(String(80), default="")
+    status: Mapped[str] = mapped_column(String(40), default="active", index=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    user: Mapped[AppUser] = relationship(back_populates="chat_sessions")
+    messages: Mapped[list[ChatMessage]] = relationship(back_populates="session", cascade="all, delete-orphan")
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("app_users.id"), index=True)
+    role: Mapped[str] = mapped_column(String(40), default="user")
+    content: Mapped[str] = mapped_column(Text, default="")
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    token_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    session: Mapped[ChatSession] = relationship(back_populates="messages")
+    user: Mapped[AppUser] = relationship()
+
+
+class UserMemorySummary(Base):
+    __tablename__ = "user_memory_summaries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("app_users.id"), unique=True, index=True)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    user: Mapped[AppUser] = relationship(back_populates="memory_summary")
+
+
+class MemoryItem(Base):
+    __tablename__ = "memory_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("app_users.id"), index=True)
+    source_session_id: Mapped[int | None] = mapped_column(ForeignKey("chat_sessions.id"), nullable=True)
+    memory_type: Mapped[str] = mapped_column(String(80), default="preference", index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    importance: Mapped[int] = mapped_column(Integer, default=3)
+    status: Mapped[str] = mapped_column(String(40), default="active", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    user: Mapped[AppUser] = relationship(back_populates="memory_items")
+    source_session: Mapped[ChatSession | None] = relationship()
+
+
 class AppApiKey(Base):
     __tablename__ = "app_api_keys"
 

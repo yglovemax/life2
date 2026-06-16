@@ -187,16 +187,140 @@ POST /api/training/runs/{run_id}/publish
 
 发布后会创建 `source_type=ai_training` 的正式知识源，并进入 `/api/knowledge/search` 检索环境。
 
+## 用户资料、本命资料、聊天和记忆接口
+
+以下接口已实现，均使用 App Key 鉴权。
+
+创建或更新用户：
+
+```http
+POST /api/app/users
+```
+
+`external_id` 是幂等键，前端可传微信 openid、App 用户 ID 或业务用户 ID。
+
+```json
+{
+  "external_id": "wechat-openid-123",
+  "nickname": "max",
+  "locale": "zh-CN",
+  "timezone": "Asia/Shanghai",
+  "profile": {
+    "channel": "wechat"
+  }
+}
+```
+
+查询用户：
+
+```http
+GET /api/app/users/{user_id}
+```
+
+保存本命资料：
+
+```http
+PUT /api/app/users/{user_id}/birth-profile
+```
+
+```json
+{
+  "nickname": "max",
+  "birth_date": "1989-09-29",
+  "birth_time": "16:00",
+  "birth_city": "兰州",
+  "birth_country": "CN",
+  "birth_timezone": "Asia/Shanghai",
+  "latitude": "36.0611",
+  "longitude": "103.8343"
+}
+```
+
+获取基础盘面快照：
+
+```http
+GET /api/app/users/{user_id}/chart
+```
+
+当前返回 `calculation_level=sun_sign_only`，只保证太阳星座和本命资料快照。完整宫位、上升、相位会在星盘计算服务阶段接入。
+
+创建聊天会话：
+
+```http
+POST /api/app/chat/sessions
+```
+
+```json
+{
+  "user_id": 1,
+  "title": "今日咨询",
+  "topic": "daily",
+  "metadata": {
+    "client": "web"
+  }
+}
+```
+
+查询聊天会话和消息：
+
+```http
+GET /api/app/chat/sessions/{session_id}
+```
+
+追加聊天消息：
+
+```http
+POST /api/app/chat/sessions/{session_id}/messages
+```
+
+```json
+{
+  "role": "user",
+  "content": "今天适合推进合作吗？"
+}
+```
+
+`role` 支持 `user`、`assistant`、`system`、`tool`。
+
+保存长期记忆摘要：
+
+```http
+PUT /api/app/users/{user_id}/memory-summary
+```
+
+```json
+{
+  "summary": "用户偏好清晰直接的建议，关注合作和关系边界。"
+}
+```
+
+新增可检索记忆条目：
+
+```http
+POST /api/app/users/{user_id}/memories
+```
+
+```json
+{
+  "memory_type": "preference",
+  "content": "用户喜欢先给结论再解释。",
+  "tags": ["偏好", "表达"],
+  "importance": 4
+}
+```
+
+查询用户记忆：
+
+```http
+GET /api/app/users/{user_id}/memories
+```
+
 ## 后续待定接口
 
-用户侧聊天和记忆接口还未实现，预计包括：
+尚未实现：
 
-- `POST /api/users`
-- `PUT /api/users/{user_id}/birth-profile`
-- `GET /api/users/{user_id}/chart`
-- `POST /api/chat/sessions`
-- `POST /api/chat/sessions/{session_id}/messages`
-- `GET /api/chat/sessions/{session_id}/stream`
-- `GET /api/users/{user_id}/memories`
-
-这些接口会在用户资料、本命盘、聊天和长期记忆后端阶段实现。
+- `GET /api/app/chat/sessions/{session_id}/stream`
+- 聊天模型编排和流式回复。
+- 自动记忆抽取。
+- 完整星盘计算服务。
+- 用户级额度、计费和权益。
