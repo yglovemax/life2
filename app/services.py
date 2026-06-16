@@ -16,7 +16,8 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.settings import get_settings
 from app.platform.object_storage import safe_object_key
-from app.platform.runtime import get_object_storage
+from app.platform.runtime import get_object_storage, get_task_queue
+from app.platform.tasks import TaskEnvelope
 from app.training.ai import (
     TRAINING_OUTPUT_SCHEMA,
     TRAINING_SYSTEM_PROMPT,
@@ -324,15 +325,58 @@ def merge_tags(*groups: list[str]) -> list[str]:
 def create_training_run(session: Session, payload: dict) -> dict:
     source, entries, source_title, source_tags = resolve_training_entries(session, payload)
     prompt = build_training_prompt(source_title, entries)
+    run_mode = "queued" if str(payload.get("run_mode") or "").strip().lower() == "queued" else "sync"
     run = TrainingRun(
         source_id=source.id if source else None,
         title=(payload.get("title") or source_title or "AI 训练运行").strip(),
-        status="running",
+        run_mode=run_mode,
+        status="queued" if run_mode == "queued" else "running",
+        task_id="",
         prompt=prompt,
+        request_payload=normalize_training_run_payload(payload, source_id=source.id if source else None, source_title=source_title),
         created_by=payload.get("operator") or "admin",
     )
     session.add(run)
     session.flush()
+
+    if run_mode == "queued":
+        task = TaskEnvelope(task_type="training.run", payload={"run_id": run.id})
+        run.task_id = get_task_queue().enqueue(task)
+        session.commit()
+        run = get_training_run_model(session, run.id)
+        return serialize_training_run(run)
+
+    return execute_training_run_record(session, run.id, payload=payload, source=source, entries=entries, source_title=source_title, source_tags=source_tags)
+
+
+def normalize_training_run_payload(payload: dict, source_id: int | None, source_title: str) -> dict:
+    clean = dict(payload)
+    clean["run_mode"] = "queued" if str(payload.get("run_mode") or "").strip().lower() == "queued" else "sync"
+    if source_id is not None:
+        clean["source_id"] = source_id
+    if not clean.get("title"):
+        clean["title"] = source_title or "AI 训练运行"
+    return clean
+
+
+def execute_training_run_record(
+    session: Session,
+    run_id: int,
+    payload: dict | None = None,
+    source: KnowledgeSource | None = None,
+    entries: list[dict] | None = None,
+    source_title: str = "",
+    source_tags: list[str] | None = None,
+) -> dict | None:
+    run = get_training_run_model(session, run_id)
+    if run is None:
+        return None
+    payload = payload or (run.request_payload or {})
+    if source is None or entries is None:
+        source, entries, source_title, source_tags = resolve_training_entries(session, payload)
+    source_tags = source_tags or []
+    run.status = "running"
+    session.commit()
 
     raw_response_text = ""
     parsed: dict = {}
@@ -387,6 +431,10 @@ def create_training_run(session: Session, payload: dict) -> dict:
     session.commit()
     run = get_training_run_model(session, run.id)
     return serialize_training_run(run)
+
+
+def execute_training_run_job(session: Session, run_id: int) -> dict | None:
+    return execute_training_run_record(session, run_id)
 
 
 def resolve_training_entries(session: Session, payload: dict) -> tuple[KnowledgeSource | None, list[dict], str, list[str]]:
@@ -579,7 +627,9 @@ def serialize_training_run(run: TrainingRun, include_raw: bool = True) -> dict:
         "source_title": run.source.title if run.source else "",
         "published_source_id": run.published_source_id,
         "title": run.title,
+        "run_mode": run.run_mode,
         "status": run.status,
+        "task_id": run.task_id,
         "error": run.error,
         "draft_count": run.draft_count,
         "created_by": run.created_by,

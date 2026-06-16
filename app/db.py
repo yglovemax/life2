@@ -38,9 +38,11 @@ def ensure_sqlite_columns() -> None:
     if not settings.database_url.startswith("sqlite"):
         return
     inspector = inspect(engine)
-    if "call_traces" not in inspector.get_table_names():
-        return
-    existing = {column["name"] for column in inspector.get_columns("call_traces")}
+    table_names = set(inspector.get_table_names())
+    if "call_traces" in table_names:
+        existing = {column["name"] for column in inspector.get_columns("call_traces")}
+    else:
+        existing = set()
     statements = []
     if "manual_score" not in existing:
         statements.append("ALTER TABLE call_traces ADD COLUMN manual_score INTEGER")
@@ -48,6 +50,14 @@ def ensure_sqlite_columns() -> None:
         statements.append("ALTER TABLE call_traces ADD COLUMN reviewer_notes TEXT DEFAULT ''")
     if "knowledge_hits" not in existing:
         statements.append("ALTER TABLE call_traces ADD COLUMN knowledge_hits JSON DEFAULT '[]'")
+    if "training_runs" in table_names:
+        training_existing = {column["name"] for column in inspector.get_columns("training_runs")}
+        if "run_mode" not in training_existing:
+            statements.append("ALTER TABLE training_runs ADD COLUMN run_mode TEXT DEFAULT 'sync'")
+        if "task_id" not in training_existing:
+            statements.append("ALTER TABLE training_runs ADD COLUMN task_id TEXT DEFAULT ''")
+        if "request_payload" not in training_existing:
+            statements.append("ALTER TABLE training_runs ADD COLUMN request_payload JSON DEFAULT '{}'")
     if not statements:
         return
     with engine.begin() as connection:

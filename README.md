@@ -31,6 +31,13 @@ Phase 1 已完成第一版闭环：
 - App Key 管理和安全审计
 - 后台登录、管理员会话和敏感接口保护
 
+Phase 2 已开始接入生产化底座：
+
+- Alembic 迁移入口
+- 队列化训练运行
+- worker 命令入口
+- 运行时存储 / 队列 / 限流后端工厂
+
 ## 本地运行
 
 ```bash
@@ -72,16 +79,27 @@ export NEXA_APP_CHAT_RATE_LIMIT_COUNT=12
 export NEXA_APP_CHAT_RATE_LIMIT_WINDOW_SECONDS=60
 ```
 
+注意：`NEXA_TASK_QUEUE_BACKEND=memory` 仅适合同进程本地开发。独立 worker 进程要消费任务，需要切到 Redis 后端。
+
 前端接口合同见：`docs/frontend-api-contract.md`
 App 对接说明见：`docs/app-api.md`
 后端集成边界见：`docs/backend-integration.md`
 安全审计说明见：`docs/security.md`
 旧项目复用清单见：`docs/reuse-inventory.md`
+第二期底座说明见：`docs/phase2-production-foundation.md`
 
 ## 测试
 
 ```bash
 pytest
+```
+
+## 迁移与 Worker
+
+```bash
+alembic upgrade head
+python -m app.worker once
+python -m app.worker
 ```
 
 ## 项目边界

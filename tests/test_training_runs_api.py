@@ -117,3 +117,61 @@ def test_training_run_records_failed_invalid_json():
     assert data["status"] == "failed"
     assert "模型输出不是有效 JSON" in data["error"]
     assert data["draft_count"] == 0
+
+
+def test_training_run_can_be_queued_and_processed_by_worker(monkeypatch):
+    from app.core.settings import get_settings
+    from app.platform.runtime import reset_platform_runtime
+    from app.worker import process_next_task
+
+    monkeypatch.setenv("NEXA_TASK_QUEUE_BACKEND", "memory")
+    get_settings.cache_clear()
+    reset_platform_runtime()
+
+    try:
+        source = create_source()
+        response = client.post(
+            "/api/training/runs",
+            json={
+                "source_id": source["id"],
+                "run_mode": "queued",
+                "simulate_model_response": json.dumps(
+                    {
+                        "chunks": [
+                            {
+                                "title": "月亮队列规则",
+                                "body": "月亮内容需要通过队列训练再入库。",
+                                "domain": "astrology",
+                                "tags": ["月亮", "队列"],
+                                "rule_type": "interpretation",
+                                "use_when": "用户问到情绪安全感时",
+                                "avoid_when": "不要做绝对判断",
+                                "examples": [],
+                                "confidence": 0.83,
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        )
+
+        assert response.status_code == 200
+        queued = response.json()
+        assert queued["status"] == "queued"
+        assert queued["run_mode"] == "queued"
+        assert queued["task_id"].startswith("task_")
+        assert queued["draft_count"] == 0
+
+        assert process_next_task() is True
+
+        detail = client.get(f"/api/training/runs/{queued['id']}")
+        assert detail.status_code == 200
+        run = detail.json()
+        assert run["status"] == "completed"
+        assert run["run_mode"] == "queued"
+        assert run["draft_count"] == 1
+        assert run["draft_chunks"][0]["title"] == "月亮队列规则"
+    finally:
+        get_settings.cache_clear()
+        reset_platform_runtime()

@@ -57,3 +57,19 @@ def test_object_storage_factory_uses_configured_upload_dir(monkeypatch, tmp_path
     finally:
         get_settings.cache_clear()
         reset_platform_runtime()
+
+
+def test_worker_once_returns_zero_when_queue_is_empty(monkeypatch):
+    from app.core.settings import get_settings
+    from app.platform.runtime import reset_platform_runtime
+    from app.worker import main
+
+    monkeypatch.setenv("NEXA_TASK_QUEUE_BACKEND", "memory")
+    get_settings.cache_clear()
+    reset_platform_runtime()
+
+    try:
+        assert main(["once"]) == 0
+    finally:
+        get_settings.cache_clear()
+        reset_platform_runtime()
