@@ -1,4 +1,5 @@
 import pytest
+import types
 
 
 def test_local_object_storage_writes_bytes_and_blocks_path_escape(tmp_path):
@@ -99,3 +100,102 @@ def test_db_runtime_can_switch_database_url_after_reset(monkeypatch, tmp_path):
     finally:
         get_settings.cache_clear()
         reset_db_runtime()
+
+
+def test_runtime_builds_redis_task_queue_and_rate_limiter(monkeypatch):
+    from app.core.settings import get_settings
+    from app.platform.runtime import get_rate_limiter, get_task_queue, reset_platform_runtime
+    from app.platform.tasks import RedisTaskQueue
+    from app.platform.rate_limit import RedisRateLimiter
+
+    calls = []
+
+    class FakeRedisClient:
+        pass
+
+    class FakeRedis:
+        @staticmethod
+        def from_url(url, decode_responses=True):
+            calls.append((url, decode_responses))
+            return FakeRedisClient()
+
+    monkeypatch.setitem(__import__("sys").modules, "redis", types.SimpleNamespace(Redis=FakeRedis))
+    monkeypatch.setenv("NEXA_TASK_QUEUE_BACKEND", "redis")
+    monkeypatch.setenv("NEXA_RATE_LIMIT_BACKEND", "redis")
+    monkeypatch.setenv("NEXA_REDIS_URL", "redis://localhost:6379/2")
+    get_settings.cache_clear()
+    reset_platform_runtime()
+
+    try:
+        queue = get_task_queue()
+        limiter = get_rate_limiter()
+        assert isinstance(queue, RedisTaskQueue)
+        assert isinstance(limiter, RedisRateLimiter)
+        assert queue.client is limiter.client
+        assert calls == [("redis://localhost:6379/2", True)]
+    finally:
+        get_settings.cache_clear()
+        reset_platform_runtime()
+
+
+def test_redis_queue_and_rate_limiter_share_backend_state(monkeypatch):
+    from app.core.settings import get_settings
+    from app.platform.runtime import get_redis_client, reset_platform_runtime
+    from app.platform.tasks import RedisTaskQueue, TaskEnvelope, run_task_once
+
+    class FakeRedisClient:
+        def __init__(self):
+            self.lists = {}
+            self.counters = {}
+            self.expirations = {}
+
+        def rpush(self, key, value):
+            self.lists.setdefault(key, []).append(value)
+
+        def lpop(self, key):
+            items = self.lists.get(key) or []
+            if not items:
+                return None
+            return items.pop(0)
+
+        def incr(self, key):
+            self.counters[key] = int(self.counters.get(key, 0)) + 1
+            return self.counters[key]
+
+        def expire(self, key, ttl):
+            self.expirations[key] = ttl
+
+        def ttl(self, key):
+            return self.expirations.get(key, -1)
+
+    client = FakeRedisClient()
+
+    class FakeRedis:
+        @staticmethod
+        def from_url(url, decode_responses=True):
+            return client
+
+    monkeypatch.setitem(__import__("sys").modules, "redis", types.SimpleNamespace(Redis=FakeRedis))
+    monkeypatch.setenv("NEXA_REDIS_URL", "redis://localhost:6379/3")
+    get_settings.cache_clear()
+    reset_platform_runtime()
+
+    try:
+        shared_client = get_redis_client()
+        queue_a = RedisTaskQueue(shared_client)
+        queue_b = RedisTaskQueue(shared_client)
+        queue_a.enqueue(TaskEnvelope(task_type="training.run", payload={"run_id": 9}))
+        handled = []
+        assert run_task_once(queue_b, lambda task: handled.append(task.payload["run_id"])) is True
+        assert handled == [9]
+
+        from app.platform.rate_limit import RedisRateLimiter
+
+        redis_limiter = RedisRateLimiter(shared_client)
+        first = redis_limiter.check("user:9", limit=1, window_seconds=60, now=1000)
+        second = redis_limiter.check("user:9", limit=1, window_seconds=60, now=1001)
+        assert first.allowed is True
+        assert second.allowed is False
+    finally:
+        get_settings.cache_clear()
+        reset_platform_runtime()

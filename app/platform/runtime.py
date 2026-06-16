@@ -8,7 +8,8 @@ from app.platform.rate_limit import InMemoryRateLimiter, RedisRateLimiter
 from app.platform.tasks import InMemoryTaskQueue, RedisTaskQueue
 
 
-def build_redis_client() -> object:
+@lru_cache
+def get_redis_client() -> object:
     settings = get_settings()
     if not settings.redis_url:
         raise ValueError("NEXA_REDIS_URL is required for redis backends")
@@ -17,6 +18,10 @@ def build_redis_client() -> object:
     except ImportError as exc:  # pragma: no cover
         raise ValueError("redis backend requires the `redis` package") from exc
     return Redis.from_url(settings.redis_url, decode_responses=True)
+
+
+def build_redis_client() -> object:
+    return get_redis_client()
 
 
 @lru_cache
@@ -35,7 +40,7 @@ def get_task_queue() -> InMemoryTaskQueue | RedisTaskQueue:
     if backend == "memory":
         return InMemoryTaskQueue()
     if backend == "redis":
-        return RedisTaskQueue(build_redis_client())
+        return RedisTaskQueue(get_redis_client())
     raise ValueError(f"unsupported task queue backend: {backend}")
 
 
@@ -46,11 +51,12 @@ def get_rate_limiter() -> InMemoryRateLimiter | RedisRateLimiter:
     if backend == "memory":
         return InMemoryRateLimiter()
     if backend == "redis":
-        return RedisRateLimiter(build_redis_client())
+        return RedisRateLimiter(get_redis_client())
     raise ValueError(f"unsupported rate limiter backend: {backend}")
 
 
 def reset_platform_runtime() -> None:
+    get_redis_client.cache_clear()
     get_object_storage.cache_clear()
     get_task_queue.cache_clear()
     get_rate_limiter.cache_clear()

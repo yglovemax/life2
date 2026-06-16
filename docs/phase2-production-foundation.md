@@ -31,6 +31,7 @@
 - 如果训练任务要由独立 worker 进程消费，必须切到 `RedisTaskQueue`，也就是配置：
   - `NEXA_TASK_QUEUE_BACKEND=redis`
   - `NEXA_REDIS_URL=...`
+- `RedisTaskQueue` 和 `RedisRateLimiter` 现在会复用同一个 Redis client，减少同进程重复建连。
 - 当前仓库已经把 worker 入口和任务协议接好了，但跨进程共享队列这一步还差真实 Redis 环境。
 
 ## 训练异步化接口

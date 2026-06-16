@@ -78,6 +78,7 @@ export NEXA_OBJECT_STORAGE_BACKEND=local
 export NEXA_TASK_QUEUE_BACKEND=memory
 export NEXA_RATE_LIMIT_BACKEND=memory
 export NEXA_DATABASE_URL=sqlite:///./data/nexa_admin.db
+export NEXA_REDIS_URL=redis://127.0.0.1:6379/0
 export NEXA_APP_CHAT_RATE_LIMIT_COUNT=12
 export NEXA_APP_CHAT_RATE_LIMIT_WINDOW_SECONDS=60
 ```
