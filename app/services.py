@@ -1644,12 +1644,21 @@ def generate_chat_reply(session: Session, session_id: int, payload: dict) -> dic
             },
         },
     )
+    memory_updates = extract_and_store_chat_memories(
+        session,
+        chat_session.user_id,
+        session_id,
+        content,
+        answer,
+        payload,
+    )
     return {
         "session_id": session_id,
         "status": "ok" if mode != "fallback" else "fallback",
         "answer": answer,
         "user_message": user_message,
         "assistant_message": assistant_message,
+        "memory_updates": memory_updates,
         "context": context,
         "meta": {
             "mode": mode,
@@ -1657,6 +1666,94 @@ def generate_chat_reply(session: Session, session_id: int, payload: dict) -> dic
             "provider": provider_meta,
         },
     }
+
+
+def extract_and_store_chat_memories(
+    session: Session,
+    user_id: int,
+    session_id: int,
+    user_content: str,
+    assistant_answer: str,
+    payload: dict,
+) -> dict:
+    if payload.get("memory_extraction") is False or payload.get("auto_memory") is False:
+        existing = session.scalar(select(UserMemorySummary).where(UserMemorySummary.user_id == user_id))
+        return {
+            "created_count": 0,
+            "items": [],
+            "summary": serialize_memory_summary(existing) if existing else None,
+        }
+
+    candidates = extract_memory_candidates(user_content, assistant_answer)
+    created_items = []
+    for candidate in candidates:
+        item = create_memory_item(
+            session,
+            user_id,
+            {
+                **candidate,
+                "source_session_id": session_id,
+            },
+        )
+        if item is not None:
+            created_items.append(item)
+
+    summary = update_memory_summary_from_candidates(session, user_id, created_items)
+    return {
+        "created_count": len(created_items),
+        "items": created_items,
+        "summary": summary,
+    }
+
+
+def extract_memory_candidates(user_content: str, assistant_answer: str) -> list[dict]:
+    text = " ".join(str(user_content or "").split())
+    answer = " ".join(str(assistant_answer or "").split())
+    candidates: list[dict] = []
+
+    def add(memory_type: str, content: str, tags: list[str], importance: int) -> None:
+        clean = compact_text(content, 140)
+        if not clean:
+            return
+        if any(item["content"] == clean for item in candidates):
+            return
+        candidates.append(
+            {
+                "memory_type": memory_type,
+                "content": clean,
+                "tags": tags,
+                "importance": importance,
+            }
+        )
+
+    if any(keyword in text for keyword in ["喜欢", "偏好", "希望", "更温和", "短回复", "先给结论"]):
+        add("preference", f"用户表达了回复偏好：{text}", ["偏好", "表达"], 4)
+    if "最近" in text:
+        add("current_state", f"用户最近状态：{text}", ["近况"], 4)
+    if any(keyword in text for keyword in ["合作", "项目", "事业", "工作"]):
+        add("current_state", f"用户当前关注合作/事业议题：{text}", ["合作", "事业"], 4)
+    if any(keyword in text for keyword in ["伴侣", "关系", "恋爱", "沟通", "边界"]):
+        add("relationship", f"用户关系议题线索：{text}", ["关系", "边界"], 4)
+    if any(keyword in answer for keyword in ["边界", "节奏", "温和"]):
+        add("assistant_observation", f"本轮回复有效线索：{answer}", ["回复线索"], 2)
+
+    return candidates[:5]
+
+
+def update_memory_summary_from_candidates(session: Session, user_id: int, items: list[dict]) -> dict | None:
+    existing = session.scalar(select(UserMemorySummary).where(UserMemorySummary.user_id == user_id))
+    if not items:
+        return serialize_memory_summary(existing) if existing else None
+
+    fragments = []
+    if existing and existing.summary:
+        fragments.append(existing.summary)
+    for item in items:
+        content = item["content"]
+        if content not in "；".join(fragments):
+            fragments.append(content)
+    summary_text = compact_text("；".join(fragments), 520)
+    return upsert_memory_summary(session, user_id, {"summary": summary_text, "metadata": {"source": "auto_chat_memory"}})
 
 
 def load_chat_session_model(session: Session, session_id: int) -> ChatSession | None:
@@ -1788,6 +1885,7 @@ def chat_reply_sse_events(reply: dict):
     chunk_size = 12
     for start in range(0, len(answer), chunk_size):
         yield sse_event("delta", {"text": answer[start : start + chunk_size]})
+    yield sse_event("memory", reply.get("memory_updates") or {"created_count": 0, "items": [], "summary": None})
     yield sse_event("done", {"assistant_message_id": reply["assistant_message"]["id"], "answer": answer})
 
 

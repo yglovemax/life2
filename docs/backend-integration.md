@@ -295,7 +295,8 @@ POST /api/app/chat/sessions/{session_id}/reply
   "content": "今天适合推进合作吗？",
   "quality_tier": "standard",
   "knowledge_tags": ["合作"],
-  "knowledge_limit": 5
+  "knowledge_limit": 5,
+  "memory_extraction": true
 }
 ```
 
@@ -315,12 +316,15 @@ POST /api/app/chat/sessions/{session_id}/reply
 - 默认 mock 模式下返回可用回复。
 - `NEXA_MODEL_CALL_MODE=live` 或传 `use_live_model=true` 时调用 OpenAI Responses API。
 - 自动保存 `assistant` 消息。
+- 默认自动抽取长期记忆，写入 `memory_items` 并更新 `memory_summary`。
+- 如本轮不希望沉淀记忆，可传 `"memory_extraction": false`。
 
 返回里会包含：
 
 - `answer`
 - `user_message`
 - `assistant_message`
+- `memory_updates`
 - `context`
 - `meta.mode`：`mock`、`simulated`、`live` 或 `fallback`
 
@@ -349,6 +353,7 @@ events.addEventListener("done", (event) => {
 
 - `meta`：本次回复元信息。
 - `delta`：分段文本。
+- `memory`：本轮自动沉淀的记忆结果。
 - `done`：完成事件，包含 `assistant_message_id`。
 
 注意：当前 SSE 第一版会先完成后端回复编排，再按事件流吐给前端。后续会接 OpenAI 原生边生成边转发。
@@ -386,11 +391,28 @@ POST /api/app/users/{user_id}/memories
 GET /api/app/users/{user_id}/memories
 ```
 
+## 自动记忆抽取
+
+聊天回复会默认抽取轻量记忆候选：
+
+- `preference`：用户表达的回答偏好，例如“先给结论”“更温和”“短回复”。
+- `current_state`：用户近期状态，例如“最近在推进合作”。
+- `relationship`：关系、伴侣、沟通、边界相关线索。
+- `assistant_observation`：本轮回复里可辅助后续理解的轻量线索。
+
+抽取结果会进入：
+
+```http
+GET /api/app/users/{user_id}/memories
+```
+
+第一版为规则抽取，不额外调用模型，避免增加成本。后续可升级为模型辅助抽取和去重。
+
 ## 后续待定接口
 
 尚未实现：
 
-- 自动记忆抽取。
 - OpenAI 原生流式边生成边转发。
+- 模型辅助记忆抽取、去重和遗忘策略。
 - 完整星盘计算服务。
 - 用户级额度、计费和权益。
