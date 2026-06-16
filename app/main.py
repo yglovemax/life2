@@ -55,6 +55,7 @@ from app.services import (
     publish_training_run,
     preview_model_route,
     record_audit_event,
+    retry_training_run,
     rollback_module,
     render_app_module,
     render_app_page,
@@ -534,6 +535,17 @@ def training_run_detail(run_id: int, session: Session = Depends(get_session)) ->
 def training_run_publish(run_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
     try:
         run = publish_training_run(session, run_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if run is None:
+        raise HTTPException(status_code=404, detail="training run not found")
+    return run
+
+
+@app.post("/api/training/runs/{run_id}/retry")
+def training_run_retry(run_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
+    try:
+        run = retry_training_run(session, run_id, payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if run is None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 import time
 
-from app.db import SessionLocal
+from app.db import get_session_factory
 from app.platform.runtime import get_task_queue
 from app.platform.tasks import run_task_once
 from app.services import execute_training_run_job
@@ -16,7 +16,7 @@ def task_handlers() -> dict:
 
 
 def handle_training_run_task(payload: dict) -> None:
-    session = SessionLocal()
+    session = get_session_factory()()
     try:
         execute_training_run_job(session, int(payload.get("run_id") or 0))
     finally:

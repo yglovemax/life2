@@ -34,7 +34,9 @@ Phase 1 已完成第一版闭环：
 Phase 2 已开始接入生产化底座：
 
 - Alembic 迁移入口
+- 数据库运行时工厂，可按 `NEXA_DATABASE_URL` 切换
 - 队列化训练运行
+- 失败训练重试接口
 - worker 命令入口
 - 运行时存储 / 队列 / 限流后端工厂
 
@@ -75,6 +77,7 @@ export NEXA_OPENAI_API_KEY="<openai_api_key>"
 export NEXA_OBJECT_STORAGE_BACKEND=local
 export NEXA_TASK_QUEUE_BACKEND=memory
 export NEXA_RATE_LIMIT_BACKEND=memory
+export NEXA_DATABASE_URL=sqlite:///./data/nexa_admin.db
 export NEXA_APP_CHAT_RATE_LIMIT_COUNT=12
 export NEXA_APP_CHAT_RATE_LIMIT_WINDOW_SECONDS=60
 ```

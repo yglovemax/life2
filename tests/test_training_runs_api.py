@@ -175,3 +175,69 @@ def test_training_run_can_be_queued_and_processed_by_worker(monkeypatch):
     finally:
         get_settings.cache_clear()
         reset_platform_runtime()
+
+
+def test_failed_training_run_can_be_retried_with_new_payload(monkeypatch):
+    from app.core.settings import get_settings
+    from app.platform.runtime import reset_platform_runtime
+    from app.worker import process_next_task
+
+    monkeypatch.setenv("NEXA_TASK_QUEUE_BACKEND", "memory")
+    get_settings.cache_clear()
+    reset_platform_runtime()
+
+    try:
+        source = create_source()
+        first = client.post(
+            "/api/training/runs",
+            json={
+                "source_id": source["id"],
+                "simulate_model_response": "不是合法 JSON",
+            },
+        )
+        assert first.status_code == 200
+        failed = first.json()
+        assert failed["status"] == "failed"
+
+        retry = client.post(
+            f"/api/training/runs/{failed['id']}/retry",
+            json={
+                "run_mode": "queued",
+                "simulate_model_response": json.dumps(
+                    {
+                        "chunks": [
+                            {
+                                "title": "月亮重试规则",
+                                "body": "失败后重试可以重新生成知识草稿。",
+                                "domain": "astrology",
+                                "tags": ["月亮", "重试"],
+                                "rule_type": "interpretation",
+                                "use_when": "训练运行失败后",
+                                "avoid_when": "不要保留脏数据",
+                                "examples": [],
+                                "confidence": 0.79,
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        )
+        assert retry.status_code == 200
+        retried = retry.json()
+        assert retried["id"] == failed["id"]
+        assert retried["status"] == "queued"
+        assert retried["run_mode"] == "queued"
+        assert retried["task_id"].startswith("task_")
+
+        assert process_next_task() is True
+
+        detail = client.get(f"/api/training/runs/{failed['id']}")
+        assert detail.status_code == 200
+        run = detail.json()
+        assert run["status"] == "completed"
+        assert run["draft_count"] == 1
+        assert run["draft_chunks"][0]["title"] == "月亮重试规则"
+    finally:
+        get_settings.cache_clear()
+        reset_platform_runtime()

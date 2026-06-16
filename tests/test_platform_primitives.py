@@ -73,3 +73,29 @@ def test_worker_once_returns_zero_when_queue_is_empty(monkeypatch):
     finally:
         get_settings.cache_clear()
         reset_platform_runtime()
+
+
+def test_db_runtime_can_switch_database_url_after_reset(monkeypatch, tmp_path):
+    from app.core.settings import get_settings
+    from app.db import get_engine, reset_db_runtime
+
+    first_db = tmp_path / "first.db"
+    second_db = tmp_path / "second.db"
+
+    monkeypatch.setenv("NEXA_DATABASE_URL", f"sqlite:///{first_db}")
+    get_settings.cache_clear()
+    reset_db_runtime()
+    first_engine = get_engine()
+
+    monkeypatch.setenv("NEXA_DATABASE_URL", f"sqlite:///{second_db}")
+    get_settings.cache_clear()
+    reset_db_runtime()
+    second_engine = get_engine()
+
+    try:
+        assert str(first_engine.url).endswith(str(first_db))
+        assert str(second_engine.url).endswith(str(second_db))
+        assert str(first_engine.url) != str(second_engine.url)
+    finally:
+        get_settings.cache_clear()
+        reset_db_runtime()

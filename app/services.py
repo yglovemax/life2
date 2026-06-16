@@ -437,6 +437,44 @@ def execute_training_run_job(session: Session, run_id: int) -> dict | None:
     return execute_training_run_record(session, run_id)
 
 
+def retry_training_run(session: Session, run_id: int, payload: dict) -> dict | None:
+    run = get_training_run_model(session, run_id)
+    if run is None:
+        return None
+    if run.status in {"queued", "running"}:
+        raise ValueError("训练运行仍在处理中，暂时不能重试。")
+
+    merged_payload = dict(run.request_payload or {})
+    merged_payload.update(payload or {})
+    source, entries, source_title, source_tags = resolve_training_entries(session, merged_payload)
+    run_mode = "queued" if str(merged_payload.get("run_mode") or "").strip().lower() == "queued" else "sync"
+
+    for chunk in list(run.draft_chunks):
+        session.delete(chunk)
+
+    run.title = (merged_payload.get("title") or source_title or run.title).strip()
+    run.run_mode = run_mode
+    run.status = "queued" if run_mode == "queued" else "running"
+    run.task_id = ""
+    run.request_payload = normalize_training_run_payload(merged_payload, source_id=source.id if source else None, source_title=source_title)
+    run.raw_response = ""
+    run.parsed_response = {}
+    run.error = ""
+    run.draft_count = 0
+    run.published_source_id = None
+    run.completed_at = None
+    session.flush()
+
+    if run_mode == "queued":
+        task = TaskEnvelope(task_type="training.run", payload={"run_id": run.id})
+        run.task_id = get_task_queue().enqueue(task)
+        session.commit()
+        run = get_training_run_model(session, run.id)
+        return serialize_training_run(run)
+
+    return execute_training_run_record(session, run.id, payload=merged_payload, source=source, entries=entries, source_title=source_title, source_tags=source_tags)
+
+
 def resolve_training_entries(session: Session, payload: dict) -> tuple[KnowledgeSource | None, list[dict], str, list[str]]:
     source_id = nullable_int(payload.get("source_id"))
     if source_id is not None:

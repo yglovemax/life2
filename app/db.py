@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from functools import lru_cache
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -9,18 +10,28 @@ class Base(DeclarativeBase):
     pass
 
 
-settings = get_settings()
-sqlite_path = settings.sqlite_path
-if sqlite_path is not None:
-    sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+@lru_cache
+def get_engine():
+    settings = get_settings()
+    sqlite_path = settings.sqlite_path
+    if sqlite_path is not None:
+        sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+    connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+    return create_engine(settings.database_url, connect_args=connect_args)
 
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+@lru_cache
+def get_session_factory():
+    return sessionmaker(bind=get_engine(), autoflush=False, autocommit=False)
+
+
+def reset_db_runtime() -> None:
+    get_session_factory.cache_clear()
+    get_engine.cache_clear()
 
 
 def get_session() -> Generator[Session, None, None]:
-    session = SessionLocal()
+    session = get_session_factory()()
     try:
         yield session
     finally:
@@ -30,13 +41,16 @@ def get_session() -> Generator[Session, None, None]:
 def init_db() -> None:
     from app import models  # noqa: F401
 
+    engine = get_engine()
     Base.metadata.create_all(bind=engine)
     ensure_sqlite_columns()
 
 
 def ensure_sqlite_columns() -> None:
+    settings = get_settings()
     if not settings.database_url.startswith("sqlite"):
         return
+    engine = get_engine()
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
     if "call_traces" in table_names:

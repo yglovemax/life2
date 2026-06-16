@@ -6,6 +6,8 @@
 
 ## 当前已落地
 
+- 数据库运行时工厂：
+  - `NEXA_DATABASE_URL`
 - 运行时工厂：
   - `NEXA_OBJECT_STORAGE_BACKEND`
   - `NEXA_TASK_QUEUE_BACKEND`
@@ -15,6 +17,8 @@
   - `queued`
 - 队列任务类型第一版：
   - `training.run`
+- 失败训练重试接口：
+  - `POST /api/training/runs/{run_id}/retry`
 - worker 命令入口：
   - `python -m app.worker once`
   - `python -m app.worker`
@@ -69,6 +73,21 @@ POST /api/training/runs
 
 ```http
 GET /api/training/runs/{run_id}
+```
+
+失败后可直接重试：
+
+```http
+POST /api/training/runs/{run_id}/retry
+```
+
+示例：
+
+```json
+{
+  "run_mode": "queued",
+  "simulate_model_response": "{\"chunks\":[...]}"
+}
 ```
 
 状态会经历：
