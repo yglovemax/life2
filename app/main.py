@@ -394,6 +394,7 @@ def app_chat_session_stream(
     session_id: int,
     content: str,
     simulate_model_response: str | None = None,
+    memory_run_mode: str | None = None,
     auth: dict = Depends(require_app_stream_token),
     session: Session = Depends(get_session),
 ) -> StreamingResponse:
@@ -401,6 +402,8 @@ def app_chat_session_stream(
     payload = {"content": content}
     if simulate_model_response is not None:
         payload["simulate_model_response"] = simulate_model_response
+    if memory_run_mode is not None:
+        payload["memory_run_mode"] = memory_run_mode
     try:
         reply = generate_chat_reply(session, session_id, payload)
     except ValueError as exc:

@@ -6,11 +6,12 @@ import time
 from app.db import get_session_factory
 from app.platform.runtime import get_task_queue
 from app.platform.tasks import run_task_once
-from app.services import execute_training_run_job
+from app.services import execute_memory_summary_job, execute_training_run_job
 
 
 def task_handlers() -> dict:
     return {
+        "memory.summarize": handle_memory_summary_task,
         "training.run": handle_training_run_task,
     }
 
@@ -19,6 +20,15 @@ def handle_training_run_task(payload: dict) -> None:
     session = get_session_factory()()
     try:
         execute_training_run_job(session, int(payload.get("run_id") or 0))
+    finally:
+        session.close()
+
+
+def handle_memory_summary_task(payload: dict) -> None:
+    session = get_session_factory()()
+    try:
+        item_ids = [int(item_id) for item_id in (payload.get("memory_item_ids") or []) if str(item_id).strip()]
+        execute_memory_summary_job(session, int(payload.get("user_id") or 0), memory_item_ids=item_ids)
     finally:
         session.close()
 

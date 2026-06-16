@@ -1809,6 +1809,10 @@ def generate_chat_reply(session: Session, session_id: int, payload: dict) -> dic
     }
 
 
+def normalize_memory_run_mode(payload: dict) -> str:
+    return "queued" if str(payload.get("memory_run_mode") or "").strip().lower() == "queued" else "sync"
+
+
 def extract_and_store_chat_memories(
     session: Session,
     user_id: int,
@@ -1823,6 +1827,8 @@ def extract_and_store_chat_memories(
             "created_count": 0,
             "items": [],
             "summary": serialize_memory_summary(existing) if existing else None,
+            "summary_status": "skipped",
+            "task_id": None,
         }
 
     candidates = extract_memory_candidates(user_content, assistant_answer)
@@ -1839,11 +1845,37 @@ def extract_and_store_chat_memories(
         if item is not None:
             created_items.append(item)
 
+    existing = session.scalar(select(UserMemorySummary).where(UserMemorySummary.user_id == user_id))
+    if not created_items:
+        return {
+            "created_count": 0,
+            "items": [],
+            "summary": serialize_memory_summary(existing) if existing else None,
+            "summary_status": "unchanged",
+            "task_id": None,
+        }
+
+    if normalize_memory_run_mode(payload) == "queued":
+        task = TaskEnvelope(
+            task_type="memory.summarize",
+            payload={"user_id": user_id, "memory_item_ids": [item["id"] for item in created_items]},
+        )
+        task_id = get_task_queue().enqueue(task)
+        return {
+            "created_count": len(created_items),
+            "items": created_items,
+            "summary": serialize_memory_summary(existing) if existing else None,
+            "summary_status": "queued",
+            "task_id": task_id,
+        }
+
     summary = update_memory_summary_from_candidates(session, user_id, created_items)
     return {
         "created_count": len(created_items),
         "items": created_items,
         "summary": summary,
+        "summary_status": "updated",
+        "task_id": None,
     }
 
 
@@ -1895,6 +1927,18 @@ def update_memory_summary_from_candidates(session: Session, user_id: int, items:
             fragments.append(content)
     summary_text = compact_text("；".join(fragments), 520)
     return upsert_memory_summary(session, user_id, {"summary": summary_text, "metadata": {"source": "auto_chat_memory"}})
+
+
+def execute_memory_summary_job(session: Session, user_id: int, memory_item_ids: list[int] | None = None) -> dict | None:
+    user = session.get(AppUser, user_id)
+    if user is None:
+        return None
+
+    query = select(MemoryItem).where(MemoryItem.user_id == user.id, MemoryItem.status == "active")
+    if memory_item_ids:
+        query = query.where(MemoryItem.id.in_(memory_item_ids))
+    items = session.scalars(query.order_by(MemoryItem.importance.desc(), MemoryItem.updated_at.desc(), MemoryItem.id.desc())).all()
+    return update_memory_summary_from_candidates(session, user.id, [serialize_memory_item(item) for item in items])
 
 
 def load_chat_session_model(session: Session, session_id: int) -> ChatSession | None:

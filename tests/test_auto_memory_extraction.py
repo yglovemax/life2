@@ -91,3 +91,88 @@ def test_chat_stream_also_extracts_memory_after_completion():
     memories = client.get(f"/api/app/users/{user['id']}/memories", headers=APP_HEADERS).json()
     assert any(item["memory_type"] == "relationship" for item in memories["items"])
     assert "温和" in memories["summary"]["summary"]
+
+
+def test_chat_reply_can_queue_memory_summary_until_worker_runs(monkeypatch):
+    from app.core.settings import get_settings
+    from app.platform.runtime import reset_platform_runtime
+    from app.worker import process_next_task
+
+    monkeypatch.setenv("NEXA_TASK_QUEUE_BACKEND", "memory")
+    get_settings.cache_clear()
+    reset_platform_runtime()
+
+    try:
+        user, chat_session = create_session()
+
+        response = client.post(
+            f"/api/app/chat/sessions/{chat_session['id']}/reply",
+            headers=APP_HEADERS,
+            json={
+                "content": "我喜欢你先给结论再解释，最近我在推进一个合作，但很在意边界。",
+                "simulate_model_response": "可以，先给结论：适合推进，但要把边界讲清楚。",
+                "memory_run_mode": "queued",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["memory_updates"]["created_count"] >= 2
+        assert data["memory_updates"]["summary_status"] == "queued"
+        assert data["memory_updates"]["task_id"].startswith("task_")
+        assert data["memory_updates"]["summary"] is None
+
+        pending = client.get(f"/api/app/users/{user['id']}/memories", headers=APP_HEADERS).json()
+        assert pending["summary"] is None
+        assert any("合作" in item["content"] for item in pending["items"])
+
+        assert process_next_task() is True
+
+        after = client.get(f"/api/app/users/{user['id']}/memories", headers=APP_HEADERS).json()
+        assert after["summary"] is not None
+        assert "先给结论" in after["summary"]["summary"]
+    finally:
+        get_settings.cache_clear()
+        reset_platform_runtime()
+
+
+def test_chat_stream_can_queue_memory_summary_until_worker_runs(monkeypatch):
+    from app.core.settings import get_settings
+    from app.platform.runtime import reset_platform_runtime
+    from app.worker import process_next_task
+
+    monkeypatch.setenv("NEXA_TASK_QUEUE_BACKEND", "memory")
+    get_settings.cache_clear()
+    reset_platform_runtime()
+
+    try:
+        user, chat_session = create_session()
+
+        with client.stream(
+            "GET",
+            f"/api/app/chat/sessions/{chat_session['id']}/stream",
+            headers=APP_HEADERS,
+            params={
+                "content": "最近我和伴侣沟通比较紧张，希望回答更温和一点。",
+                "simulate_model_response": "可以，我会更温和地回应。",
+                "memory_run_mode": "queued",
+            },
+        ) as response:
+            assert response.status_code == 200
+            body = response.read().decode("utf-8")
+
+        assert "event: memory" in body
+        assert '"summary_status": "queued"' in body
+
+        pending = client.get(f"/api/app/users/{user['id']}/memories", headers=APP_HEADERS).json()
+        assert pending["summary"] is None
+        assert any(item["memory_type"] == "relationship" for item in pending["items"])
+
+        assert process_next_task() is True
+
+        after = client.get(f"/api/app/users/{user['id']}/memories", headers=APP_HEADERS).json()
+        assert after["summary"] is not None
+        assert "温和" in after["summary"]["summary"]
+    finally:
+        get_settings.cache_clear()
+        reset_platform_runtime()

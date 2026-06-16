@@ -253,7 +253,8 @@ Request：
   "quality_tier": "standard",
   "knowledge_tags": ["合作"],
   "knowledge_limit": 5,
-  "memory_extraction": true
+  "memory_extraction": true,
+  "memory_run_mode": "sync"
 }
 ```
 
@@ -273,6 +274,9 @@ Request：
 - 生成回复。
 - 自动保存 `assistant` 消息。
 - 默认自动抽取长期记忆。
+- `memory_run_mode` 可选：
+  - `sync`：默认，同步更新 `memory_summary`
+  - `queued`：立即落库 `memory_items`，把长期摘要更新交给 worker
 
 Response 重点字段：
 
@@ -286,7 +290,9 @@ Response 重点字段：
   "memory_updates": {
     "created_count": 2,
     "items": [],
-    "summary": {}
+    "summary": {},
+    "summary_status": "updated",
+    "task_id": null
   },
   "context": {
     "user": {},
@@ -334,6 +340,22 @@ X-RateLimit-Reset: 1760300000
 }
 ```
 
+如果希望把长期摘要异步化：
+
+```json
+{
+  "content": "我喜欢先给结论，最近在推进合作。",
+  "memory_run_mode": "queued"
+}
+```
+
+此时返回里：
+
+- `memory_updates.items`：本轮新增的记忆条目，已落库。
+- `memory_updates.summary`：当前已存在的摘要快照，可能为 `null`。
+- `memory_updates.summary_status`：`queued`
+- `memory_updates.task_id`：本次摘要任务 ID
+
 ### SSE 流式回复
 
 ```http
@@ -344,6 +366,7 @@ GET /api/app/chat/sessions/{session_id}/stream?content=<urlencoded_message>
 
 - `content`：必填，用户消息。
 - `simulate_model_response`：可选，联调用。
+- `memory_run_mode`：可选，`sync` 或 `queued`。
 - `api_key`：可选，仅给原生 EventSource 使用。
 
 #### 方式 A：fetch stream，推荐生产使用
@@ -373,6 +396,7 @@ while (true) {
 const url =
   `/api/app/chat/sessions/${sessionId}/stream` +
   `?content=${encodeURIComponent(message)}` +
+  `&memory_run_mode=queued` +
   `&api_key=${encodeURIComponent(appApiKey)}`;
 
 const events = new EventSource(url);
@@ -400,7 +424,7 @@ events.addEventListener("done", (event) => {
 
 - `meta`
 - `delta`
-- `memory`
+- `memory`：包含 `created_count`、`items`、`summary`、`summary_status`、`task_id`
 - `done`
 
 如果流式接口命中限流，会直接返回 `429`，并附带同样的 `X-RateLimit-*` 头。前端应做退避，不要立刻重建 `EventSource`。

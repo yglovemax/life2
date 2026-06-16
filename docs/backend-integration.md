@@ -296,7 +296,8 @@ POST /api/app/chat/sessions/{session_id}/reply
   "quality_tier": "standard",
   "knowledge_tags": ["合作"],
   "knowledge_limit": 5,
-  "memory_extraction": true
+  "memory_extraction": true,
+  "memory_run_mode": "sync"
 }
 ```
 
@@ -317,6 +318,7 @@ POST /api/app/chat/sessions/{session_id}/reply
 - `NEXA_MODEL_CALL_MODE=live` 或传 `use_live_model=true` 时调用 OpenAI Responses API。
 - 自动保存 `assistant` 消息。
 - 默认自动抽取长期记忆，写入 `memory_items` 并更新 `memory_summary`。
+- `memory_run_mode=queued` 时，只同步写入 `memory_items`，把 `memory_summary` 更新放入 `memory.summarize` 任务队列。
 - 如本轮不希望沉淀记忆，可传 `"memory_extraction": false`。
 
 返回里会包含：
@@ -332,6 +334,12 @@ SSE 流式回复：
 
 ```http
 GET /api/app/chat/sessions/{session_id}/stream?content=今天适合表达想法吗？
+```
+
+如果前端想把长期摘要异步化，可额外传：
+
+```text
+&memory_run_mode=queued
 ```
 
 EventSource 示例：
@@ -356,7 +364,7 @@ events.addEventListener("done", (event) => {
 
 - `meta`：本次回复元信息。
 - `delta`：分段文本。
-- `memory`：本轮自动沉淀的记忆结果。
+- `memory`：本轮自动沉淀的记忆结果，新增 `summary_status` 和 `task_id`。
 - `done`：完成事件，包含 `assistant_message_id`。
 
 注意：当前 SSE 第一版会先完成后端回复编排，再按事件流吐给前端。后续会接 OpenAI 原生边生成边转发。

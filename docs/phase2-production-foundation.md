@@ -17,6 +17,7 @@
   - `queued`
 - 队列任务类型第一版：
   - `training.run`
+  - `memory.summarize`
 - 失败训练重试接口：
   - `POST /api/training/runs/{run_id}/retry`
 - 训练队列观测接口：
@@ -133,6 +134,21 @@ GET /api/training/queue-status
 - `completed`
 - `failed`
 
+## 聊天记忆摘要异步化
+
+聊天回复接口新增可选参数：
+
+- `memory_run_mode=sync`
+- `memory_run_mode=queued`
+
+当前策略：
+
+- `memory_items` 仍然同步创建，保证前端能立刻拿到本轮记忆条目。
+- `memory_summary` 在 `queued` 模式下交给 `memory.summarize` worker 任务处理。
+- SSE 的 `memory` 事件现在会带：
+  - `summary_status`
+  - `task_id`
+
 ## 命令
 
 安装依赖：
@@ -167,7 +183,7 @@ python -m app.worker
 
 ## 下一步
 
-- 把 `memory.summarize` 也迁成任务化。
 - 把 `RedisTaskQueue` 和 `RedisRateLimiter` 接到真实 `NEXA_REDIS_URL`。
 - 加 Postgres 专用迁移和 pgvector 字段。
 - 把训练失败重试和死信策略补上。
+- 把聊天记忆条目的落库也继续拆向异步批处理。
