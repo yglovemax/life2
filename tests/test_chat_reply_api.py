@@ -122,3 +122,22 @@ def test_chat_stream_emits_sse_events_and_persists_assistant_message():
     detail = client.get(f"/api/app/chat/sessions/{chat_session['id']}", headers=APP_HEADERS).json()
     assert detail["messages"][-1]["role"] == "assistant"
     assert "重点说清楚" in detail["messages"][-1]["content"]
+
+
+def test_chat_stream_accepts_query_api_key_for_native_event_source():
+    _, chat_session = create_chat_user_with_context()
+
+    with client.stream(
+        "GET",
+        f"/api/app/chat/sessions/{chat_session['id']}/stream",
+        params={
+            "api_key": "dev-app-token",
+            "content": "今天要注意什么？",
+            "simulate_model_response": "先把节奏放慢一点。",
+        },
+    ) as response:
+        assert response.status_code == 200
+        body = response.read().decode("utf-8")
+
+    assert "event: delta" in body
+    assert "先把节奏放慢一点" in body

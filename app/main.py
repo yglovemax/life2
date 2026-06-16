@@ -139,6 +139,32 @@ def require_admin_session(
     return user
 
 
+def require_app_stream_token(
+    request: Request,
+    api_key: str | None = None,
+    authorization: str | None = Header(default=None),
+    x_nexa_api_key: str | None = Header(default=None),
+    session: Session = Depends(get_session),
+) -> dict:
+    token = x_nexa_api_key or api_key or ""
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+    auth = authenticate_app_token(session, token, get_settings().app_api_token)
+    if auth is None:
+        record_audit_event(
+            session,
+            event_type="app_auth_failed",
+            actor="external_app",
+            target_type="app_stream",
+            target_id=request.url.path,
+            severity="warning",
+            status="blocked",
+            details={"path": request.url.path, "token_prefix": f"{token[:4]}***" if token else ""},
+        )
+        raise HTTPException(status_code=401, detail="invalid app api token")
+    return auth
+
+
 @app.get("/", response_class=HTMLResponse)
 def root() -> HTMLResponse:
     return HTMLResponse('<meta http-equiv="refresh" content="0; url=/admin">')
@@ -337,7 +363,7 @@ def app_chat_session_stream(
     session_id: int,
     content: str,
     simulate_model_response: str | None = None,
-    _: dict = Depends(require_app_token),
+    _: dict = Depends(require_app_stream_token),
     session: Session = Depends(get_session),
 ) -> StreamingResponse:
     payload = {"content": content}

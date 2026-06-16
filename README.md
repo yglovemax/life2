@@ -60,6 +60,7 @@ export NEXA_OPENAI_API_KEY="<openai_api_key>"
 
 后台保存的模型供应商 Key 只做配置、脱敏展示和审计占位；实际运行时 Key 读取 `NEXA_OPENAI_API_KEY`，避免数据库保存可逆明文密钥。
 
+前端接口合同见：`docs/frontend-api-contract.md`
 App 对接说明见：`docs/app-api.md`
 后端集成边界见：`docs/backend-integration.md`
 安全审计说明见：`docs/security.md`
