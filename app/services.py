@@ -1619,6 +1619,182 @@ def serialize_memory_item(item: MemoryItem) -> dict:
     }
 
 
+def generate_chat_reply(session: Session, session_id: int, payload: dict) -> dict | None:
+    chat_session = load_chat_session_model(session, session_id)
+    if chat_session is None:
+        return None
+    content = str(payload.get("content") or "").strip()
+    if not content:
+        raise ValueError("reply content is required")
+
+    user_message = append_chat_message(session, session_id, {"role": "user", "content": content, "metadata": payload.get("user_message_metadata") or {}})
+    context = build_chat_context(session, session_id, content, payload)
+    model_request = build_chat_model_request(context, content, payload)
+    answer, mode, provider_meta = resolve_chat_answer(model_request, context, content, payload)
+    assistant_message = append_chat_message(
+        session,
+        session_id,
+        {
+            "role": "assistant",
+            "content": answer,
+            "metadata": {
+                "mode": mode,
+                "provider": provider_meta,
+                "knowledge_hit_ids": [item["id"] for item in context["knowledge_hits"]],
+            },
+        },
+    )
+    return {
+        "session_id": session_id,
+        "status": "ok" if mode != "fallback" else "fallback",
+        "answer": answer,
+        "user_message": user_message,
+        "assistant_message": assistant_message,
+        "context": context,
+        "meta": {
+            "mode": mode,
+            "model_request": model_request,
+            "provider": provider_meta,
+        },
+    }
+
+
+def load_chat_session_model(session: Session, session_id: int) -> ChatSession | None:
+    return session.scalar(
+        select(ChatSession)
+        .where(ChatSession.id == session_id)
+        .options(joinedload(ChatSession.user), selectinload(ChatSession.messages))
+    )
+
+
+def build_chat_context(session: Session, session_id: int, content: str, payload: dict) -> dict:
+    chat_session = load_chat_session_model(session, session_id)
+    user = chat_session.user
+    chart = get_user_chart(session, user.id) or {"birth_profile": None, "chart_snapshot": {}, "warnings": []}
+    memory = list_user_memories(session, user.id) or {"summary": None, "items": []}
+    tags = normalize_tags(payload.get("knowledge_tags") or [])
+    knowledge_hits = search_knowledge(session, {"query": content, "tags": tags, "limit": int(payload.get("knowledge_limit") or 5)})
+    recent_messages = [
+        serialize_chat_message(message)
+        for message in sorted(chat_session.messages, key=lambda item: item.id)[-8:]
+    ]
+    return {
+        "user": serialize_app_user(user),
+        "birth_profile": chart.get("birth_profile"),
+        "chart_snapshot": chart.get("chart_snapshot") or {},
+        "chart_warnings": chart.get("warnings") or [],
+        "memory": memory,
+        "recent_messages": recent_messages,
+        "knowledge_hits": knowledge_hits,
+    }
+
+
+def build_chat_model_request(context: dict, content: str, payload: dict) -> str:
+    memory_summary = (context.get("memory") or {}).get("summary") or {}
+    memory_items = (context.get("memory") or {}).get("items") or []
+    lines = [
+        "你是 Nexa 占星咨询后端回复 Agent。",
+        "要求：温暖、清晰、不过度绝对化；不得输出医疗、法律、投资等高风险承诺。",
+        f"输出档位：{payload.get('quality_tier') or 'standard'}",
+        "",
+        f"用户：{context['user'].get('nickname') or context['user'].get('external_id')}",
+        f"盘面快照：{json.dumps(context.get('chart_snapshot') or {}, ensure_ascii=False)}",
+        f"长期记忆摘要：{memory_summary.get('summary') or ''}",
+        f"可检索记忆：{json.dumps(memory_items[:5], ensure_ascii=False)}",
+        f"知识库命中：{json.dumps(context.get('knowledge_hits') or [], ensure_ascii=False)}",
+        f"最近消息：{json.dumps(context.get('recent_messages') or [], ensure_ascii=False)}",
+        "",
+        f"用户本轮问题：{content}",
+        "请直接给出可发送给用户的中文回复。",
+    ]
+    return "\n".join(lines)
+
+
+def resolve_chat_answer(model_request: str, context: dict, content: str, payload: dict) -> tuple[str, str, dict]:
+    if "simulate_model_response" in payload:
+        return coerce_raw_model_response(payload.get("simulate_model_response")).strip(), "simulated", {}
+    if should_call_live_model(payload):
+        provider_result = call_chat_model_provider(model_request, payload)
+        if provider_result.get("ok"):
+            return provider_result.get("raw_text") or "", "live", provider_result.get("usage") or {}
+        answer = build_mock_chat_answer(context, content)
+        return answer, "fallback", {"error": provider_result.get("error") or "", "fallback_reason": provider_result.get("fallback_reason") or ""}
+    return build_mock_chat_answer(context, content), "mock", {}
+
+
+def build_mock_chat_answer(context: dict, content: str) -> str:
+    user = context.get("user") or {}
+    nickname = user.get("nickname") or "你好"
+    sun_sign = (context.get("chart_snapshot") or {}).get("sun_sign") or "你的太阳星座"
+    memory_summary = ((context.get("memory") or {}).get("summary") or {}).get("summary") or ""
+    knowledge_hint = ""
+    if context.get("knowledge_hits"):
+        knowledge_hint = f"我会参考「{context['knowledge_hits'][0]['title']}」这条规则，"
+    memory_hint = "结合你过往偏好，" if memory_summary else ""
+    return (
+        f"{nickname}，我先给结论：这件事可以推进，但要保留节奏感。"
+        f"你当前基础盘面显示太阳在{sun_sign}，更适合用清晰、对等的方式表达。"
+        f"{memory_hint}{knowledge_hint}今天先做一个小确认，比一次性把话说满更稳。"
+        f"针对“{content}”，建议先问清对方期待，再决定投入多少资源。"
+    )
+
+
+def call_chat_model_provider(model_request: str, payload: dict) -> dict:
+    settings = get_settings()
+    if not settings.openai_api_key:
+        return {"ok": False, "fallback_reason": "provider_key_missing", "error": "NEXA_OPENAI_API_KEY is not configured", "raw_text": ""}
+    endpoint = settings.openai_base_url.rstrip("/") + "/responses"
+    request_body = {
+        "model": payload.get("model_name") or "gpt-5.4-mini",
+        "input": [{"role": "user", "content": model_request}],
+        "store": False,
+        "max_output_tokens": int(payload.get("max_output_tokens") or 700),
+    }
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {settings.openai_api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=settings.model_request_timeout_seconds) as response:
+            response_payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        return {"ok": False, "fallback_reason": "model_provider_error", "error": detail, "raw_text": detail}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+        return {"ok": False, "fallback_reason": "model_provider_error", "error": str(error), "raw_text": str(error)}
+
+    raw_text = extract_openai_output_text(response_payload)
+    usage = response_payload.get("usage") or {}
+    return {
+        "ok": bool(raw_text),
+        "fallback_reason": "" if raw_text else "empty_model_response",
+        "error": "" if raw_text else "OpenAI response did not include output text",
+        "raw_text": raw_text,
+        "usage": {
+            "input_tokens": usage.get("input_tokens") or usage.get("prompt_tokens") or 0,
+            "output_tokens": usage.get("output_tokens") or usage.get("completion_tokens") or 0,
+        },
+    }
+
+
+def chat_reply_sse_events(reply: dict):
+    yield sse_event("meta", {"session_id": reply["session_id"], "status": reply["status"], "mode": reply["meta"]["mode"]})
+    answer = reply.get("answer") or ""
+    chunk_size = 12
+    for start in range(0, len(answer), chunk_size):
+        yield sse_event("delta", {"text": answer[start : start + chunk_size]})
+    yield sse_event("done", {"assistant_message_id": reply["assistant_message"]["id"], "answer": answer})
+
+
+def sse_event(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
 def render_app_module(session: Session, module_slug: str, payload: dict, request_id: str | None = None) -> dict | None:
     module = session.scalar(
         select(Module)

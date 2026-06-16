@@ -1,7 +1,7 @@
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
@@ -25,6 +25,8 @@ from app.services import (
     create_or_update_app_user,
     create_output_policy,
     create_training_run,
+    chat_reply_sse_events,
+    generate_chat_reply,
     get_app_user,
     get_chat_session,
     get_module_detail,
@@ -312,6 +314,42 @@ def app_chat_session_message_create(
     if message is None:
         raise HTTPException(status_code=404, detail="chat session not found")
     return message
+
+
+@app.post("/api/app/chat/sessions/{session_id}/reply")
+def app_chat_session_reply(
+    session_id: int,
+    payload: dict,
+    _: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    try:
+        reply = generate_chat_reply(session, session_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if reply is None:
+        raise HTTPException(status_code=404, detail="chat session not found")
+    return reply
+
+
+@app.get("/api/app/chat/sessions/{session_id}/stream")
+def app_chat_session_stream(
+    session_id: int,
+    content: str,
+    simulate_model_response: str | None = None,
+    _: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> StreamingResponse:
+    payload = {"content": content}
+    if simulate_model_response is not None:
+        payload["simulate_model_response"] = simulate_model_response
+    try:
+        reply = generate_chat_reply(session, session_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if reply is None:
+        raise HTTPException(status_code=404, detail="chat session not found")
+    return StreamingResponse(chat_reply_sse_events(reply), media_type="text/event-stream")
 
 
 @app.put("/api/app/users/{user_id}/memory-summary")

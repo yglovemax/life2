@@ -282,6 +282,77 @@ POST /api/app/chat/sessions/{session_id}/messages
 
 `role` 支持 `user`、`assistant`、`system`、`tool`。
 
+生成聊天回复：
+
+```http
+POST /api/app/chat/sessions/{session_id}/reply
+```
+
+请求示例：
+
+```json
+{
+  "content": "今天适合推进合作吗？",
+  "quality_tier": "standard",
+  "knowledge_tags": ["合作"],
+  "knowledge_limit": 5
+}
+```
+
+开发联调时可传：
+
+```json
+{
+  "content": "今天适合推进合作吗？",
+  "simulate_model_response": "可以推进，但先确认节奏、边界和对方反馈。"
+}
+```
+
+行为：
+
+- 自动保存本轮 `user` 消息。
+- 组装用户资料、基础盘面快照、长期记忆、最近消息、知识库命中。
+- 默认 mock 模式下返回可用回复。
+- `NEXA_MODEL_CALL_MODE=live` 或传 `use_live_model=true` 时调用 OpenAI Responses API。
+- 自动保存 `assistant` 消息。
+
+返回里会包含：
+
+- `answer`
+- `user_message`
+- `assistant_message`
+- `context`
+- `meta.mode`：`mock`、`simulated`、`live` 或 `fallback`
+
+SSE 流式回复：
+
+```http
+GET /api/app/chat/sessions/{session_id}/stream?content=今天适合表达想法吗？
+```
+
+EventSource 示例：
+
+```js
+const url = `/api/app/chat/sessions/${sessionId}/stream?content=${encodeURIComponent(message)}`;
+const events = new EventSource(url);
+events.addEventListener("delta", (event) => {
+  const { text } = JSON.parse(event.data);
+  appendText(text);
+});
+events.addEventListener("done", (event) => {
+  const { assistant_message_id } = JSON.parse(event.data);
+  events.close();
+});
+```
+
+当前 SSE 事件：
+
+- `meta`：本次回复元信息。
+- `delta`：分段文本。
+- `done`：完成事件，包含 `assistant_message_id`。
+
+注意：当前 SSE 第一版会先完成后端回复编排，再按事件流吐给前端。后续会接 OpenAI 原生边生成边转发。
+
 保存长期记忆摘要：
 
 ```http
@@ -319,8 +390,7 @@ GET /api/app/users/{user_id}/memories
 
 尚未实现：
 
-- `GET /api/app/chat/sessions/{session_id}/stream`
-- 聊天模型编排和流式回复。
 - 自动记忆抽取。
+- OpenAI 原生流式边生成边转发。
 - 完整星盘计算服务。
 - 用户级额度、计费和权益。
