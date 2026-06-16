@@ -27,6 +27,15 @@ def process_next_task() -> bool:
     return run_task_once(get_task_queue(), task_handlers())
 
 
+def drain_tasks(limit: int = 10) -> int:
+    handled = 0
+    for _ in range(max(limit, 0)):
+        if not process_next_task():
+            break
+        handled += 1
+    return handled
+
+
 def run_forever(poll_interval_seconds: float = 1.0) -> None:
     while True:
         handled = process_next_task()
@@ -37,7 +46,8 @@ def run_forever(poll_interval_seconds: float = 1.0) -> None:
 def main(argv: list[str] | None = None) -> int:
     argv = argv or sys.argv[1:]
     if argv and argv[0] == "once":
-        process_next_task()
+        limit = int(argv[1]) if len(argv) > 1 else 1
+        drain_tasks(limit=limit)
         return 0
     run_forever()
     return 0

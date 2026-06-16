@@ -15,6 +15,7 @@ from app.services import (
     authenticate_app_token,
     cost_summary,
     append_chat_message,
+    cancel_training_run,
     create_chat_session,
     create_issue,
     create_knowledge_source,
@@ -70,6 +71,7 @@ from app.services import (
     serialize_admin_user,
     save_birth_profile,
     list_user_memories,
+    training_queue_status,
     update_module,
     update_output_policy,
     update_issue,
@@ -515,6 +517,11 @@ def training_runs(session: Session = Depends(get_session)) -> dict:
     return {"items": list_training_runs(session)}
 
 
+@app.get("/api/training/queue-status")
+def training_queue_status_view(session: Session = Depends(get_session)) -> dict:
+    return training_queue_status(session)
+
+
 @app.post("/api/training/runs")
 def training_run_create(payload: dict, session: Session = Depends(get_session)) -> dict:
     try:
@@ -546,6 +553,17 @@ def training_run_publish(run_id: int, payload: dict, session: Session = Depends(
 def training_run_retry(run_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
     try:
         run = retry_training_run(session, run_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if run is None:
+        raise HTTPException(status_code=404, detail="training run not found")
+    return run
+
+
+@app.post("/api/training/runs/{run_id}/cancel")
+def training_run_cancel(run_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
+    try:
+        run = cancel_training_run(session, run_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if run is None:

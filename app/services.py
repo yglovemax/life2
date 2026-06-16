@@ -434,6 +434,11 @@ def execute_training_run_record(
 
 
 def execute_training_run_job(session: Session, run_id: int) -> dict | None:
+    run = get_training_run_model(session, run_id)
+    if run is None:
+        return None
+    if run.status == "canceled":
+        return serialize_training_run(run)
     return execute_training_run_record(session, run_id)
 
 
@@ -473,6 +478,20 @@ def retry_training_run(session: Session, run_id: int, payload: dict) -> dict | N
         return serialize_training_run(run)
 
     return execute_training_run_record(session, run.id, payload=merged_payload, source=source, entries=entries, source_title=source_title, source_tags=source_tags)
+
+
+def cancel_training_run(session: Session, run_id: int) -> dict | None:
+    run = get_training_run_model(session, run_id)
+    if run is None:
+        return None
+    if run.status != "queued":
+        raise ValueError("只有排队中的训练运行可以取消。")
+    run.status = "canceled"
+    run.task_id = ""
+    run.completed_at = utc_now()
+    session.commit()
+    run = get_training_run_model(session, run.id)
+    return serialize_training_run(run)
 
 
 def resolve_training_entries(session: Session, payload: dict) -> tuple[KnowledgeSource | None, list[dict], str, list[str]]:
@@ -596,6 +615,32 @@ def list_training_runs(session: Session, limit: int = 30) -> list[dict]:
         .limit(limit)
     ).all()
     return [serialize_training_run(run, include_raw=False) for run in runs]
+
+
+def training_queue_status(session: Session) -> dict:
+    queue = get_task_queue()
+    backend = get_settings().task_queue_backend.strip().lower() or "memory"
+    runs = session.scalars(select(TrainingRun).order_by(TrainingRun.created_at.desc(), TrainingRun.id.desc())).all()
+    counts = {
+        "queued": 0,
+        "running": 0,
+        "completed": 0,
+        "failed": 0,
+        "published": 0,
+        "canceled": 0,
+    }
+    queued_run_ids: list[int] = []
+    for run in runs:
+        if run.status in counts:
+            counts[run.status] += 1
+        if run.status == "queued":
+            queued_run_ids.append(run.id)
+    return {
+        "backend": backend,
+        "pending_tasks": queue.size(),
+        "runs": counts,
+        "queued_run_ids": queued_run_ids,
+    }
 
 
 def get_training_run(session: Session, run_id: int) -> dict | None:

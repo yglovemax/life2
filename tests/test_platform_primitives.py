@@ -28,6 +28,7 @@ def test_in_memory_task_queue_processes_envelopes_once():
     assert run_task_once(queue, lambda task: handled.append(task.task_type)) is True
     assert run_task_once(queue, lambda task: handled.append(task.task_type)) is False
     assert handled == ["knowledge.ingest", "memory.summarize"]
+    assert queue.size() == 0
 
 
 def test_in_memory_rate_limiter_blocks_after_limit():

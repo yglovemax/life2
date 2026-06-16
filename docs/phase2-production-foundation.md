@@ -19,8 +19,13 @@
   - `training.run`
 - 失败训练重试接口：
   - `POST /api/training/runs/{run_id}/retry`
+- 训练队列观测接口：
+  - `GET /api/training/queue-status`
+- 训练取消接口：
+  - `POST /api/training/runs/{run_id}/cancel`
 - worker 命令入口：
   - `python -m app.worker once`
+  - `python -m app.worker once 20`
   - `python -m app.worker`
 - Alembic 初始化：
   - `alembic upgrade head`
@@ -91,6 +96,36 @@ POST /api/training/runs/{run_id}/retry
 }
 ```
 
+排队中可以取消：
+
+```http
+POST /api/training/runs/{run_id}/cancel
+```
+
+查看当前队列：
+
+```http
+GET /api/training/queue-status
+```
+
+返回重点字段：
+
+```json
+{
+  "backend": "memory",
+  "pending_tasks": 3,
+  "runs": {
+    "queued": 2,
+    "running": 0,
+    "completed": 10,
+    "failed": 1,
+    "published": 0,
+    "canceled": 1
+  },
+  "queued_run_ids": [12, 13]
+}
+```
+
 状态会经历：
 
 - `queued`
@@ -116,6 +151,12 @@ alembic upgrade head
 
 ```bash
 python -m app.worker once
+```
+
+单次最多处理 20 个任务：
+
+```bash
+python -m app.worker once 20
 ```
 
 持续运行 worker：

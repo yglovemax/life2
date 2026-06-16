@@ -37,6 +37,7 @@ Phase 2 已开始接入生产化底座：
 - 数据库运行时工厂，可按 `NEXA_DATABASE_URL` 切换
 - 队列化训练运行
 - 失败训练重试接口
+- 训练队列状态接口和取消接口
 - worker 命令入口
 - 运行时存储 / 队列 / 限流后端工厂
 
@@ -103,6 +104,7 @@ pytest
 ```bash
 alembic upgrade head
 python -m app.worker once
+python -m app.worker once 20
 python -m app.worker
 ```
 

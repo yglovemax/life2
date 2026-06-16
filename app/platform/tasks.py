@@ -46,6 +46,9 @@ class InMemoryTaskQueue:
             return None
         return self.items.pop(0)
 
+    def size(self) -> int:
+        return len(self.items)
+
 
 class RedisTaskQueue:
     def __init__(self, client: object, key: str = "nexa:tasks") -> None:
@@ -62,6 +65,9 @@ class RedisTaskQueue:
     def pop(self) -> TaskEnvelope | None:
         raw = self.client.lpop(self.key)
         return TaskEnvelope.from_json(raw) if raw else None
+
+    def size(self) -> int:
+        return int(self.client.llen(self.key))
 
 
 def run_task_once(

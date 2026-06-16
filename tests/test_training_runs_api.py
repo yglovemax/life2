@@ -241,3 +241,149 @@ def test_failed_training_run_can_be_retried_with_new_payload(monkeypatch):
     finally:
         get_settings.cache_clear()
         reset_platform_runtime()
+
+
+def test_training_queue_status_reports_pending_runs(monkeypatch):
+    from app.core.settings import get_settings
+    from app.platform.runtime import reset_platform_runtime
+
+    monkeypatch.setenv("NEXA_TASK_QUEUE_BACKEND", "memory")
+    get_settings.cache_clear()
+    reset_platform_runtime()
+
+    try:
+        source = create_source()
+        queued = client.post(
+            "/api/training/runs",
+            json={
+                "source_id": source["id"],
+                "run_mode": "queued",
+                "simulate_model_response": json.dumps(
+                    {
+                        "chunks": [
+                            {
+                                "title": "队列状态规则",
+                                "body": "查看当前队列积压。",
+                                "domain": "astrology",
+                                "tags": ["队列"],
+                                "rule_type": "interpretation",
+                                "use_when": "需要看 worker backlog 时",
+                                "avoid_when": "不要忽略排队任务",
+                                "examples": [],
+                                "confidence": 0.71,
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ).json()
+
+        response = client.get("/api/training/queue-status")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["backend"] == "memory"
+        assert data["pending_tasks"] >= 1
+        assert data["runs"]["queued"] >= 1
+        assert queued["id"] in data["queued_run_ids"]
+    finally:
+        get_settings.cache_clear()
+        reset_platform_runtime()
+
+
+def test_worker_can_drain_multiple_tasks(monkeypatch):
+    from app.core.settings import get_settings
+    from app.platform.runtime import reset_platform_runtime
+    from app.worker import drain_tasks
+
+    monkeypatch.setenv("NEXA_TASK_QUEUE_BACKEND", "memory")
+    get_settings.cache_clear()
+    reset_platform_runtime()
+
+    try:
+        for title in ["A", "B"]:
+            source = create_source()
+            client.post(
+                "/api/training/runs",
+                json={
+                    "source_id": source["id"],
+                    "run_mode": "queued",
+                    "simulate_model_response": json.dumps(
+                        {
+                            "chunks": [
+                                {
+                                    "title": f"{title} 队列规则",
+                                    "body": "批量消费任务。",
+                                    "domain": "astrology",
+                                    "tags": ["批量"],
+                                    "rule_type": "interpretation",
+                                    "use_when": "worker 批处理时",
+                                    "avoid_when": "不要只跑一个任务就停",
+                                    "examples": [],
+                                    "confidence": 0.7,
+                                }
+                            ]
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            )
+
+        assert drain_tasks(limit=2) == 2
+        status = client.get("/api/training/queue-status").json()
+        assert status["pending_tasks"] == 0
+    finally:
+        get_settings.cache_clear()
+        reset_platform_runtime()
+
+
+def test_queued_training_run_can_be_canceled_and_worker_skips_it(monkeypatch):
+    from app.core.settings import get_settings
+    from app.platform.runtime import reset_platform_runtime
+    from app.worker import process_next_task
+
+    monkeypatch.setenv("NEXA_TASK_QUEUE_BACKEND", "memory")
+    get_settings.cache_clear()
+    reset_platform_runtime()
+
+    try:
+        source = create_source()
+        queued = client.post(
+            "/api/training/runs",
+            json={
+                "source_id": source["id"],
+                "run_mode": "queued",
+                "simulate_model_response": json.dumps(
+                    {
+                        "chunks": [
+                            {
+                                "title": "取消规则",
+                                "body": "如果取消则不再执行。",
+                                "domain": "astrology",
+                                "tags": ["取消"],
+                                "rule_type": "interpretation",
+                                "use_when": "任务取消时",
+                                "avoid_when": "不要继续执行",
+                                "examples": [],
+                                "confidence": 0.7,
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ).json()
+
+        canceled = client.post(f"/api/training/runs/{queued['id']}/cancel", json={})
+        assert canceled.status_code == 200
+        canceled_run = canceled.json()
+        assert canceled_run["status"] == "canceled"
+
+        assert process_next_task() is True
+
+        detail = client.get(f"/api/training/runs/{queued['id']}").json()
+        assert detail["status"] == "canceled"
+        assert detail["draft_count"] == 0
+    finally:
+        get_settings.cache_clear()
+        reset_platform_runtime()
