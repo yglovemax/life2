@@ -1488,7 +1488,7 @@ def save_birth_profile(session: Session, user_id: int, payload: dict) -> dict | 
     profile.birth_timezone = (payload.get("birth_timezone") or payload.get("timezone") or profile.birth_timezone or user.timezone).strip()
     profile.latitude = str(payload.get("latitude") or profile.latitude or "").strip()
     profile.longitude = str(payload.get("longitude") or profile.longitude or "").strip()
-    profile.raw_payload = payload
+    profile.raw_payload = merge_birth_profile_payload(profile.raw_payload or {}, payload)
     profile.chart_snapshot = build_chart_snapshot(profile)
     session.commit()
     session.refresh(profile)
@@ -1520,6 +1520,15 @@ def get_user_chart(session: Session, user_id: int) -> dict | None:
 
 
 def build_chart_snapshot(profile: BirthProfile) -> dict:
+    system_type = chart_system_from_profile(profile)
+    if system_type == "bazi":
+        return build_bazi_chart_snapshot(profile)
+    if system_type == "hybrid":
+        return build_hybrid_chart_snapshot(profile)
+    return build_astrology_chart_snapshot(profile)
+
+
+def build_astrology_chart_snapshot(profile: BirthProfile) -> dict:
     warnings = ["当前版本为后端基础盘面快照，只计算太阳星座；完整宫位、上升、相位将在星盘计算服务阶段接入。"]
     sun_sign = sun_sign_from_birth_date(profile.birth_date)
     if not sun_sign:
@@ -1529,12 +1538,100 @@ def build_chart_snapshot(profile: BirthProfile) -> dict:
     if not profile.latitude or not profile.longitude:
         warnings.append("缺少出生地经纬度，后续无法精确计算宫位。")
     return {
+        "system_type": "astrology",
         "calculation_level": "sun_sign_only",
         "sun_sign": sun_sign,
         "birth_datetime": " ".join(part for part in [profile.birth_date, profile.birth_time] if part),
         "birth_city": profile.birth_city,
         "birth_timezone": profile.birth_timezone,
         "warnings": warnings,
+    }
+
+
+def build_bazi_chart_snapshot(profile: BirthProfile) -> dict:
+    bazi_profile = bazi_profile_from_profile(profile)
+    pillars = bazi_pillars_from_profile(bazi_profile)
+    warnings = ["当前版本为后端基础八字快照，使用输入的四柱与日主；大运、流年、藏干和旺衰将在八字计算服务阶段接入。"]
+    if not all(pillars.values()):
+        warnings.append("四柱信息还不完整，后续分析会受影响。")
+    if not bazi_profile.get("day_master"):
+        warnings.append("缺少日主信息，当前只能保留四柱原始输入。")
+    if not profile.birth_time:
+        warnings.append("缺少出生时间，时柱可能不准确。")
+    return {
+        "system_type": "bazi",
+        "calculation_level": "bazi_input_only",
+        "birth_datetime": " ".join(part for part in [profile.birth_date, profile.birth_time] if part),
+        "birth_city": profile.birth_city,
+        "birth_timezone": profile.birth_timezone,
+        "pillars": pillars,
+        "day_master": bazi_profile.get("day_master") or "",
+        "five_elements": bazi_profile.get("five_elements") or {},
+        "ten_gods": bazi_profile.get("ten_gods") or [],
+        "warnings": warnings,
+    }
+
+
+def build_hybrid_chart_snapshot(profile: BirthProfile) -> dict:
+    astrology = build_astrology_chart_snapshot(profile)
+    bazi = build_bazi_chart_snapshot(profile)
+    warnings = list(dict.fromkeys([*(astrology.get("warnings") or []), *(bazi.get("warnings") or [])]))
+    return {
+        "system_type": "hybrid",
+        "calculation_level": "hybrid_foundation",
+        "birth_datetime": astrology.get("birth_datetime") or bazi.get("birth_datetime") or "",
+        "birth_city": profile.birth_city,
+        "birth_timezone": profile.birth_timezone,
+        "sun_sign": astrology.get("sun_sign") or "",
+        "pillars": bazi.get("pillars") or {},
+        "day_master": bazi.get("day_master") or "",
+        "five_elements": bazi.get("five_elements") or {},
+        "ten_gods": bazi.get("ten_gods") or [],
+        "warnings": warnings,
+    }
+
+
+def merge_birth_profile_payload(existing: dict, payload: dict) -> dict:
+    merged = dict(existing or {})
+    for key, value in (payload or {}).items():
+        if key == "bazi_profile" and isinstance(value, dict):
+            current = merged.get("bazi_profile") if isinstance(merged.get("bazi_profile"), dict) else {}
+            merged["bazi_profile"] = {**current, **value}
+        else:
+            merged[key] = value
+    return merged
+
+
+def chart_system_from_profile(profile: BirthProfile) -> str:
+    raw = profile.raw_payload or {}
+    system = str(raw.get("chart_system") or raw.get("reading_system") or "").strip().lower()
+    if system in {"bazi", "hybrid", "astrology"}:
+        return system
+    if isinstance(raw.get("bazi_profile"), dict):
+        return "bazi"
+    return "astrology"
+
+
+def bazi_profile_from_profile(profile: BirthProfile) -> dict:
+    raw = profile.raw_payload or {}
+    bazi_profile = raw.get("bazi_profile") if isinstance(raw.get("bazi_profile"), dict) else {}
+    return {
+        "year_pillar": str(bazi_profile.get("year_pillar") or "").strip(),
+        "month_pillar": str(bazi_profile.get("month_pillar") or "").strip(),
+        "day_pillar": str(bazi_profile.get("day_pillar") or "").strip(),
+        "hour_pillar": str(bazi_profile.get("hour_pillar") or "").strip(),
+        "day_master": str(bazi_profile.get("day_master") or "").strip(),
+        "five_elements": bazi_profile.get("five_elements") if isinstance(bazi_profile.get("five_elements"), dict) else {},
+        "ten_gods": bazi_profile.get("ten_gods") if isinstance(bazi_profile.get("ten_gods"), list) else [],
+    }
+
+
+def bazi_pillars_from_profile(bazi_profile: dict) -> dict:
+    return {
+        "year": str(bazi_profile.get("year_pillar") or "").strip(),
+        "month": str(bazi_profile.get("month_pillar") or "").strip(),
+        "day": str(bazi_profile.get("day_pillar") or "").strip(),
+        "hour": str(bazi_profile.get("hour_pillar") or "").strip(),
     }
 
 
@@ -1687,6 +1784,7 @@ def serialize_app_user(user: AppUser) -> dict:
 
 
 def serialize_birth_profile(profile: BirthProfile) -> dict:
+    chart_system = chart_system_from_profile(profile)
     return {
         "id": profile.id,
         "user_id": profile.user_id,
@@ -1698,6 +1796,8 @@ def serialize_birth_profile(profile: BirthProfile) -> dict:
         "birth_timezone": profile.birth_timezone,
         "latitude": profile.latitude,
         "longitude": profile.longitude,
+        "chart_system": chart_system,
+        "bazi_profile": bazi_profile_from_profile(profile) if chart_system in {"bazi", "hybrid"} else {},
         "chart_snapshot": profile.chart_snapshot or {},
         "created_at": profile.created_at.isoformat(),
         "updated_at": profile.updated_at.isoformat(),
@@ -1975,7 +2075,7 @@ def build_chat_model_request(context: dict, content: str, payload: dict) -> str:
     memory_summary = (context.get("memory") or {}).get("summary") or {}
     memory_items = (context.get("memory") or {}).get("items") or []
     lines = [
-        "你是 Nexa 占星咨询后端回复 Agent。",
+        "你是 Nexa 占星/八字咨询后端回复 Agent。",
         "要求：温暖、清晰、不过度绝对化；不得输出医疗、法律、投资等高风险承诺。",
         f"输出档位：{payload.get('quality_tier') or 'standard'}",
         "",
@@ -2007,12 +2107,30 @@ def resolve_chat_answer(model_request: str, context: dict, content: str, payload
 def build_mock_chat_answer(context: dict, content: str) -> str:
     user = context.get("user") or {}
     nickname = user.get("nickname") or "你好"
-    sun_sign = (context.get("chart_snapshot") or {}).get("sun_sign") or "你的太阳星座"
+    chart_snapshot = context.get("chart_snapshot") or {}
+    system_type = chart_snapshot.get("system_type") or "astrology"
+    sun_sign = chart_snapshot.get("sun_sign") or "你的太阳星座"
+    day_master = chart_snapshot.get("day_master") or "你的日主"
+    pillars = chart_snapshot.get("pillars") or {}
     memory_summary = ((context.get("memory") or {}).get("summary") or {}).get("summary") or ""
     knowledge_hint = ""
     if context.get("knowledge_hits"):
         knowledge_hint = f"我会参考「{context['knowledge_hits'][0]['title']}」这条规则，"
     memory_hint = "结合你过往偏好，" if memory_summary else ""
+    if system_type == "bazi":
+        pillar_hint = "/".join(filter(None, [pillars.get("year"), pillars.get("month"), pillars.get("day"), pillars.get("hour")]))
+        pillar_text = f"四柱里先看到{pillar_hint}，" if pillar_hint else ""
+        return (
+            f"{nickname}，我先给结论：这件事可以推进，但不要一下子把力出尽。"
+            f"从八字基础信息看，你的日主是{day_master}，{pillar_text}更适合先稳住节奏，再决定要不要继续加码。"
+            f"{memory_hint}{knowledge_hint}针对“{content}”，建议先确认现实条件和合作边界，再决定主动推进到什么程度。"
+        )
+    if system_type == "hybrid":
+        return (
+            f"{nickname}，我先给结论：这件事可以推进，但要同时顾到节奏和边界。"
+            f"你现在的基础资料里，太阳星座是{sun_sign}，八字日主是{day_master}，更适合先看清局势，再做清晰表达。"
+            f"{memory_hint}{knowledge_hint}针对“{content}”，建议先做一轮确认，再决定是否继续加大投入。"
+        )
     return (
         f"{nickname}，我先给结论：这件事可以推进，但要保留节奏感。"
         f"你当前基础盘面显示太阳在{sun_sign}，更适合用清晰、对等的方式表达。"

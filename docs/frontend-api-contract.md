@@ -139,6 +139,35 @@ Request：
 }
 ```
 
+如果前端要保存八字基础资料，可在同一个接口里补充：
+
+```json
+{
+  "chart_system": "bazi",
+  "bazi_profile": {
+    "year_pillar": "己巳",
+    "month_pillar": "癸酉",
+    "day_pillar": "乙丑",
+    "hour_pillar": "甲申",
+    "day_master": "乙木",
+    "five_elements": {
+      "wood": 2,
+      "fire": 1,
+      "earth": 2,
+      "metal": 2,
+      "water": 1
+    },
+    "ten_gods": ["比肩", "偏印"]
+  }
+}
+```
+
+说明：
+
+- `chart_system` 当前支持 `astrology`、`bazi`、`hybrid`
+- `bazi_profile` 这版是“输入型快照”，先保存上游算法或人工整理后的四柱事实
+- 后续真实八字排盘服务接入后，仍复用同一个接口
+
 Response 包含保存后的资料和 `chart_snapshot`。
 
 ### 获取盘面快照
@@ -155,9 +184,11 @@ Response：
   "birth_profile": {
     "birth_date": "1989-09-29",
     "birth_time": "16:00",
-    "birth_city": "兰州"
+    "birth_city": "兰州",
+    "chart_system": "astrology"
   },
   "chart_snapshot": {
+    "system_type": "astrology",
     "calculation_level": "sun_sign_only",
     "sun_sign": "天秤座",
     "birth_datetime": "1989-09-29 16:00",
@@ -169,7 +200,42 @@ Response：
 }
 ```
 
-当前 `calculation_level=sun_sign_only`，只保证太阳星座和本命资料快照。完整上升、宫位、相位后续由星盘计算服务补上。
+八字模式示例：
+
+```json
+{
+  "user_id": 1,
+  "birth_profile": {
+    "chart_system": "bazi",
+    "bazi_profile": {
+      "year_pillar": "己巳",
+      "month_pillar": "癸酉",
+      "day_pillar": "乙丑",
+      "hour_pillar": "甲申",
+      "day_master": "乙木"
+    }
+  },
+  "chart_snapshot": {
+    "system_type": "bazi",
+    "calculation_level": "bazi_input_only",
+    "pillars": {
+      "year": "己巳",
+      "month": "癸酉",
+      "day": "乙丑",
+      "hour": "甲申"
+    },
+    "day_master": "乙木"
+  }
+}
+```
+
+当前支持三种基础快照：
+
+- `system_type=astrology`：`calculation_level=sun_sign_only`
+- `system_type=bazi`：`calculation_level=bazi_input_only`
+- `system_type=hybrid`：同时返回太阳星座和八字基础事实
+
+完整上升、宫位、相位，以及八字大运、流年、藏干、旺衰，后续由专门计算服务补上。
 
 ## 3. 聊天会话
 

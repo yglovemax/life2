@@ -75,6 +75,44 @@ def test_birth_profile_save_and_chart_snapshot():
     assert chart["warnings"]
 
 
+def test_birth_profile_save_supports_bazi_snapshot():
+    user = create_user()
+
+    save_response = client.put(
+        f"/api/app/users/{user['id']}/birth-profile",
+        headers=APP_HEADERS,
+        json={
+            "nickname": "max",
+            "birth_date": "1989-09-29",
+            "birth_time": "16:00",
+            "birth_city": "兰州",
+            "birth_timezone": "Asia/Shanghai",
+            "chart_system": "bazi",
+            "bazi_profile": {
+                "year_pillar": "己巳",
+                "month_pillar": "癸酉",
+                "day_pillar": "乙丑",
+                "hour_pillar": "甲申",
+                "day_master": "乙木",
+                "five_elements": {"wood": 2, "fire": 1, "earth": 2, "metal": 2, "water": 1},
+                "ten_gods": ["比肩", "偏印"],
+            },
+        },
+    )
+    assert save_response.status_code == 200
+    profile = save_response.json()
+    assert profile["chart_system"] == "bazi"
+    assert profile["bazi_profile"]["day_master"] == "乙木"
+
+    chart_response = client.get(f"/api/app/users/{user['id']}/chart", headers=APP_HEADERS)
+    assert chart_response.status_code == 200
+    chart = chart_response.json()
+    assert chart["chart_snapshot"]["system_type"] == "bazi"
+    assert chart["chart_snapshot"]["calculation_level"] == "bazi_input_only"
+    assert chart["chart_snapshot"]["day_master"] == "乙木"
+    assert chart["chart_snapshot"]["pillars"]["year"] == "己巳"
+
+
 def test_chat_session_records_messages_in_order():
     user = create_user()
     session_response = client.post(

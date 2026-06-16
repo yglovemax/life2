@@ -101,6 +101,56 @@ def test_chat_reply_mock_uses_context_when_no_model_response():
     assert data["meta"]["mode"] == "mock"
 
 
+def test_chat_reply_mock_uses_bazi_context_when_profile_is_bazi():
+    user_response = client.post(
+        "/api/app/users",
+        headers=APP_HEADERS,
+        json={"external_id": f"chat-user-{uuid4().hex}", "nickname": "max", "timezone": "Asia/Shanghai"},
+    )
+    assert user_response.status_code == 200
+    user = user_response.json()
+    birth_response = client.put(
+        f"/api/app/users/{user['id']}/birth-profile",
+        headers=APP_HEADERS,
+        json={
+            "nickname": "max",
+            "birth_date": "1989-09-29",
+            "birth_time": "16:00",
+            "birth_city": "兰州",
+            "birth_timezone": "Asia/Shanghai",
+            "chart_system": "bazi",
+            "bazi_profile": {
+                "year_pillar": "己巳",
+                "month_pillar": "癸酉",
+                "day_pillar": "乙丑",
+                "hour_pillar": "甲申",
+                "day_master": "乙木",
+            },
+        },
+    )
+    assert birth_response.status_code == 200
+    session_response = client.post(
+        "/api/app/chat/sessions",
+        headers=APP_HEADERS,
+        json={"user_id": user["id"], "title": "八字咨询", "topic": "bazi"},
+    )
+    assert session_response.status_code == 200
+    chat_session = session_response.json()
+
+    response = client.post(
+        f"/api/app/chat/sessions/{chat_session['id']}/reply",
+        headers=APP_HEADERS,
+        json={"content": "我最近适合主动推进事业吗？"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert "乙木" in data["answer"]
+    assert "八字" in data["answer"]
+    assert data["context"]["chart_snapshot"]["system_type"] == "bazi"
+
+
 def test_chat_stream_emits_sse_events_and_persists_assistant_message():
     _, chat_session = create_chat_user_with_context()
 

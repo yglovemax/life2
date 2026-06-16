@@ -236,13 +236,38 @@ PUT /api/app/users/{user_id}/birth-profile
 }
 ```
 
+八字接入第一版也走同一个接口，补充：
+
+```json
+{
+  "chart_system": "bazi",
+  "bazi_profile": {
+    "year_pillar": "己巳",
+    "month_pillar": "癸酉",
+    "day_pillar": "乙丑",
+    "hour_pillar": "甲申",
+    "day_master": "乙木"
+  }
+}
+```
+
 获取基础盘面快照：
 
 ```http
 GET /api/app/users/{user_id}/chart
 ```
 
-当前返回 `calculation_level=sun_sign_only`，只保证太阳星座和本命资料快照。完整宫位、上升、相位会在星盘计算服务阶段接入。
+当前返回支持三类基础快照：
+
+- `system_type=astrology` → `calculation_level=sun_sign_only`
+- `system_type=bazi` → `calculation_level=bazi_input_only`
+- `system_type=hybrid` → `calculation_level=hybrid_foundation`
+
+说明：
+
+- 占星仍是太阳星座基础快照。
+- 八字当前先接“输入型四柱事实”，方便和现有八字算法服务或人工录入结果对接。
+- 完整宫位、上升、相位，以及八字大运、流年、藏干、旺衰，后续由独立计算服务补齐。
 
 创建聊天会话：
 
@@ -320,6 +345,12 @@ POST /api/app/chat/sessions/{session_id}/reply
 - 默认自动抽取长期记忆，写入 `memory_items` 并更新 `memory_summary`。
 - `memory_run_mode=queued` 时，只同步写入 `memory_items`，把 `memory_summary` 更新放入 `memory.summarize` 任务队列。
 - 如本轮不希望沉淀记忆，可传 `"memory_extraction": false`。
+
+当前 mock 回复已经会读取：
+
+- 占星模式下的 `sun_sign`
+- 八字模式下的 `day_master` 和 `pillars`
+- 混合模式下的 `sun_sign + day_master`
 
 返回里会包含：
 

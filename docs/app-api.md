@@ -152,3 +152,29 @@ App API 只允许读取已发布模块：
 - `pending_approval`
 - `rolled_back`
 - `disabled`
+
+## 本命资料扩展
+
+`PUT /api/app/users/{user_id}/birth-profile` 现在除了占星基础资料，也支持保存八字基础事实：
+
+```json
+{
+  "chart_system": "bazi",
+  "bazi_profile": {
+    "year_pillar": "己巳",
+    "month_pillar": "癸酉",
+    "day_pillar": "乙丑",
+    "hour_pillar": "甲申",
+    "day_master": "乙木"
+  }
+}
+```
+
+当前约定：
+
+- `chart_system` 支持 `astrology`、`bazi`、`hybrid`
+- 占星返回 `system_type=astrology`
+- 八字返回 `system_type=bazi`
+- 混合资料返回 `system_type=hybrid`
+
+这版八字属于“输入型快照”，用于先接前端和算法结果，不代表完整八字排盘引擎已经上线。
