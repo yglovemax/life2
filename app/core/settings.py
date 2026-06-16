@@ -1,23 +1,37 @@
 from functools import lru_cache
 import os
 from pathlib import Path
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    return os.environ.get(name, "1" if default else "").lower() in {"1", "true", "yes", "on"}
+
+
+def env_int(name: str, default: int) -> int:
+    return int(os.environ.get(name, str(default)))
 
 
 class Settings(BaseModel):
     app_name: str = "Nexa AI API Admin"
-    database_url: str = "sqlite:///./data/nexa_admin.db"
+    database_url: str = Field(default_factory=lambda: os.environ.get("NEXA_DATABASE_URL", "sqlite:///./data/nexa_admin.db"))
     demo_mode: bool = True
-    app_api_token: str = os.environ.get("NEXA_APP_API_TOKEN", "dev-app-token")
-    admin_username: str = os.environ.get("NEXA_ADMIN_USERNAME", "admin")
-    admin_password: str = os.environ.get("NEXA_ADMIN_PASSWORD", "admin123")
-    admin_auth_required: bool = os.environ.get("NEXA_ADMIN_AUTH_REQUIRED", "").lower() in {"1", "true", "yes", "on"}
-    model_call_mode: str = os.environ.get("NEXA_MODEL_CALL_MODE", "mock")
-    openai_api_key: str = os.environ.get("NEXA_OPENAI_API_KEY", "")
-    openai_base_url: str = os.environ.get("NEXA_OPENAI_BASE_URL", "https://api.openai.com/v1")
-    model_request_timeout_seconds: int = int(os.environ.get("NEXA_MODEL_REQUEST_TIMEOUT_SECONDS", "45"))
-    upload_storage_dir: str = os.environ.get("NEXA_UPLOAD_STORAGE_DIR", "./data/uploads")
-    max_upload_file_bytes: int = int(os.environ.get("NEXA_MAX_UPLOAD_FILE_BYTES", str(8 * 1024 * 1024)))
+    app_api_token: str = Field(default_factory=lambda: os.environ.get("NEXA_APP_API_TOKEN", "dev-app-token"))
+    admin_username: str = Field(default_factory=lambda: os.environ.get("NEXA_ADMIN_USERNAME", "admin"))
+    admin_password: str = Field(default_factory=lambda: os.environ.get("NEXA_ADMIN_PASSWORD", "admin123"))
+    admin_auth_required: bool = Field(default_factory=lambda: env_bool("NEXA_ADMIN_AUTH_REQUIRED"))
+    model_call_mode: str = Field(default_factory=lambda: os.environ.get("NEXA_MODEL_CALL_MODE", "mock"))
+    openai_api_key: str = Field(default_factory=lambda: os.environ.get("NEXA_OPENAI_API_KEY", ""))
+    openai_base_url: str = Field(default_factory=lambda: os.environ.get("NEXA_OPENAI_BASE_URL", "https://api.openai.com/v1"))
+    model_request_timeout_seconds: int = Field(default_factory=lambda: env_int("NEXA_MODEL_REQUEST_TIMEOUT_SECONDS", 45))
+    upload_storage_dir: str = Field(default_factory=lambda: os.environ.get("NEXA_UPLOAD_STORAGE_DIR", "./data/uploads"))
+    max_upload_file_bytes: int = Field(default_factory=lambda: env_int("NEXA_MAX_UPLOAD_FILE_BYTES", 8 * 1024 * 1024))
+    object_storage_backend: str = Field(default_factory=lambda: os.environ.get("NEXA_OBJECT_STORAGE_BACKEND", "local"))
+    task_queue_backend: str = Field(default_factory=lambda: os.environ.get("NEXA_TASK_QUEUE_BACKEND", "memory"))
+    rate_limit_backend: str = Field(default_factory=lambda: os.environ.get("NEXA_RATE_LIMIT_BACKEND", "memory"))
+    redis_url: str = Field(default_factory=lambda: os.environ.get("NEXA_REDIS_URL", ""))
+    app_chat_rate_limit_count: int = Field(default_factory=lambda: env_int("NEXA_APP_CHAT_RATE_LIMIT_COUNT", 12))
+    app_chat_rate_limit_window_seconds: int = Field(default_factory=lambda: env_int("NEXA_APP_CHAT_RATE_LIMIT_WINDOW_SECONDS", 60))
 
     @property
     def sqlite_path(self) -> Path | None:

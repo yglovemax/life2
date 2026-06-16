@@ -24,6 +24,8 @@ Phase 1 已完成第一版闭环：
 - 训练资料上传、GitHub 导入和 AI 训练草稿发布 API
 - 用户资料、本命资料、聊天会话、消息记录和长期记忆 API
 - 聊天回复编排和 SSE 流式回复 API
+- 可配置对象存储 / 任务队列 / 限流运行时工厂
+- App 聊天接口限流和 `X-RateLimit-*` 响应头
 - 聊天自动记忆抽取和长期摘要更新
 - 正式调用与测试调用隔离
 - App Key 管理和安全审计
@@ -59,6 +61,16 @@ export NEXA_OPENAI_API_KEY="<openai_api_key>"
 ```
 
 后台保存的模型供应商 Key 只做配置、脱敏展示和审计占位；实际运行时 Key 读取 `NEXA_OPENAI_API_KEY`，避免数据库保存可逆明文密钥。
+
+生产化运行时可继续覆盖：
+
+```bash
+export NEXA_OBJECT_STORAGE_BACKEND=local
+export NEXA_TASK_QUEUE_BACKEND=memory
+export NEXA_RATE_LIMIT_BACKEND=memory
+export NEXA_APP_CHAT_RATE_LIMIT_COUNT=12
+export NEXA_APP_CHAT_RATE_LIMIT_WINDOW_SECONDS=60
+```
 
 前端接口合同见：`docs/frontend-api-contract.md`
 App 对接说明见：`docs/app-api.md`

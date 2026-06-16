@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import secrets
+import tempfile
 import urllib.error
 import urllib.request
 from datetime import date, timedelta
@@ -14,7 +15,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.settings import get_settings
-from app.platform.object_storage import LocalObjectStorage, safe_object_key
+from app.platform.object_storage import safe_object_key
+from app.platform.runtime import get_object_storage
 from app.training.ai import (
     TRAINING_OUTPUT_SCHEMA,
     TRAINING_SYSTEM_PROMPT,
@@ -226,7 +228,7 @@ def upload_knowledge_files(session: Session, payload: dict, source_prefix: str =
         raise ValueError("请至少选择一个训练资料文件。")
 
     settings = get_settings()
-    storage = LocalObjectStorage(settings.upload_storage_dir)
+    storage = get_object_storage()
     base_tags = normalize_tags(payload.get("tags") or [])
     sources: list[dict] = []
 
@@ -238,7 +240,13 @@ def upload_knowledge_files(session: Session, payload: dict, source_prefix: str =
 
         object_key = safe_object_key("knowledge/uploads", filename, f"upload_{uuid4().hex[:12]}")
         stored = storage.put_bytes(object_key, content, file_payload.get("content_type") or "application/octet-stream")
-        entries = parse_training_document(storage.resolve_key(stored.key))
+        with tempfile.NamedTemporaryFile(suffix=Path(filename).suffix, delete=False) as handle:
+            handle.write(content)
+            temp_path = Path(handle.name)
+        try:
+            entries = parse_training_document(temp_path)
+        finally:
+            temp_path.unlink(missing_ok=True)
         if not entries:
             raise ValueError(f"{filename} 没有解析出有效内容。")
 

@@ -1,12 +1,13 @@
 from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
 from app.db import get_session, init_db
+from app.platform.runtime import get_rate_limiter
 from app.models import AdminUser
 from app.seed import ensure_seed_data
 from app.services import (
@@ -163,6 +164,31 @@ def require_app_stream_token(
         )
         raise HTTPException(status_code=401, detail="invalid app api token")
     return auth
+
+
+def app_chat_rate_limit_headers(limit: int, remaining: int, reset_at: float) -> dict[str, str]:
+    return {
+        "X-RateLimit-Limit": str(max(limit, 1)),
+        "X-RateLimit-Remaining": str(max(remaining, 0)),
+        "X-RateLimit-Reset": str(max(int(reset_at), 0)),
+    }
+
+
+def enforce_app_chat_rate_limit(auth: dict, session_id: int, response: Response | None = None) -> dict[str, str]:
+    settings = get_settings()
+    limiter = get_rate_limiter()
+    decision = limiter.check(
+        f"app-chat:{auth.get('key_id') or auth.get('name') or 'app'}:session:{session_id}",
+        limit=max(settings.app_chat_rate_limit_count, 1),
+        window_seconds=max(settings.app_chat_rate_limit_window_seconds, 1),
+    )
+    headers = app_chat_rate_limit_headers(settings.app_chat_rate_limit_count, decision.remaining, decision.reset_at)
+    if not decision.allowed:
+        raise HTTPException(status_code=429, detail="app chat rate limit exceeded", headers=headers)
+    if response is not None:
+        for key, value in headers.items():
+            response.headers[key] = value
+    return headers
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -346,9 +372,11 @@ def app_chat_session_message_create(
 def app_chat_session_reply(
     session_id: int,
     payload: dict,
-    _: dict = Depends(require_app_token),
+    response: Response,
+    auth: dict = Depends(require_app_token),
     session: Session = Depends(get_session),
 ) -> dict:
+    enforce_app_chat_rate_limit(auth, session_id, response=response)
     try:
         reply = generate_chat_reply(session, session_id, payload)
     except ValueError as exc:
@@ -363,9 +391,10 @@ def app_chat_session_stream(
     session_id: int,
     content: str,
     simulate_model_response: str | None = None,
-    _: dict = Depends(require_app_stream_token),
+    auth: dict = Depends(require_app_stream_token),
     session: Session = Depends(get_session),
 ) -> StreamingResponse:
+    headers = enforce_app_chat_rate_limit(auth, session_id)
     payload = {"content": content}
     if simulate_model_response is not None:
         payload["simulate_model_response"] = simulate_model_response
@@ -375,7 +404,7 @@ def app_chat_session_stream(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if reply is None:
         raise HTTPException(status_code=404, detail="chat session not found")
-    return StreamingResponse(chat_reply_sse_events(reply), media_type="text/event-stream")
+    return StreamingResponse(chat_reply_sse_events(reply), media_type="text/event-stream", headers=headers)
 
 
 @app.put("/api/app/users/{user_id}/memory-summary")

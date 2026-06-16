@@ -141,3 +141,37 @@ def test_chat_stream_accepts_query_api_key_for_native_event_source():
 
     assert "event: delta" in body
     assert "先把节奏放慢一点" in body
+
+
+def test_chat_reply_rate_limit_returns_429_with_headers(monkeypatch):
+    from app.core.settings import get_settings
+    from app.platform.runtime import reset_platform_runtime
+
+    monkeypatch.setenv("NEXA_RATE_LIMIT_BACKEND", "memory")
+    monkeypatch.setenv("NEXA_APP_CHAT_RATE_LIMIT_COUNT", "1")
+    monkeypatch.setenv("NEXA_APP_CHAT_RATE_LIMIT_WINDOW_SECONDS", "60")
+    get_settings.cache_clear()
+    reset_platform_runtime()
+
+    try:
+        _, chat_session = create_chat_user_with_context()
+        first = client.post(
+            f"/api/app/chat/sessions/{chat_session['id']}/reply",
+            headers=APP_HEADERS,
+            json={"content": "今天适合推进合作吗？", "simulate_model_response": "先确认节奏。"},
+        )
+        second = client.post(
+            f"/api/app/chat/sessions/{chat_session['id']}/reply",
+            headers=APP_HEADERS,
+            json={"content": "今天适合推进合作吗？", "simulate_model_response": "再慢一点。"},
+        )
+
+        assert first.status_code == 200
+        assert second.status_code == 429
+        assert second.json()["detail"] == "app chat rate limit exceeded"
+        assert second.headers["x-ratelimit-limit"] == "1"
+        assert second.headers["x-ratelimit-remaining"] == "0"
+        assert second.headers["x-ratelimit-reset"]
+    finally:
+        get_settings.cache_clear()
+        reset_platform_runtime()

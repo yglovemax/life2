@@ -363,6 +363,8 @@ events.addEventListener("done", (event) => {
 
 浏览器原生 `EventSource` 不能设置 `Authorization` header，所以 stream 接口额外支持 `api_key` 查询参数。生产环境如果使用 query token，建议换成短期 token；也可以用 `fetch` 读取 stream 并通过 header 传 App Key。
 
+`reply` 和 `stream` 现在都会返回 `X-RateLimit-Limit`、`X-RateLimit-Remaining`、`X-RateLimit-Reset`。如果超过当前窗口，会返回 `429 app chat rate limit exceeded`，前端应该退避，不要立即重试。
+
 保存长期记忆摘要：
 
 ```http

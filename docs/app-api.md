@@ -26,6 +26,16 @@ Authorization: Bearer dev-app-token
 X-Nexa-Api-Key: dev-app-token
 ```
 
+聊天 `reply` 和 `stream` 接口还会返回：
+
+```http
+X-RateLimit-Limit: 12
+X-RateLimit-Remaining: 11
+X-RateLimit-Reset: 1760300000
+```
+
+如果同一 App Key 在同一聊天会话窗口内超过限制，接口会返回 `429` 和 `app chat rate limit exceeded`。
+
 ## 页面级 JSON API
 
 ```http

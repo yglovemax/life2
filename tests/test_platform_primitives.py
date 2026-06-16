@@ -38,3 +38,22 @@ def test_in_memory_rate_limiter_blocks_after_limit():
     assert limiter.allow("user:1", limit=2, window_seconds=60, now=1001) is True
     assert limiter.allow("user:1", limit=2, window_seconds=60, now=1002) is False
     assert limiter.allow("user:1", limit=2, window_seconds=60, now=1061) is True
+
+
+def test_object_storage_factory_uses_configured_upload_dir(monkeypatch, tmp_path):
+    from app.core.settings import get_settings
+    from app.platform.runtime import get_object_storage, reset_platform_runtime
+
+    monkeypatch.setenv("NEXA_OBJECT_STORAGE_BACKEND", "local")
+    monkeypatch.setenv("NEXA_UPLOAD_STORAGE_DIR", str(tmp_path))
+    get_settings.cache_clear()
+    reset_platform_runtime()
+
+    try:
+        storage = get_object_storage()
+        stored = storage.put_bytes("knowledge/uploads/factory.txt", b"factory", "text/plain")
+        assert stored.key == "knowledge/uploads/factory.txt"
+        assert (tmp_path / "knowledge" / "uploads" / "factory.txt").read_bytes() == b"factory"
+    finally:
+        get_settings.cache_clear()
+        reset_platform_runtime()

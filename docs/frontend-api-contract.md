@@ -64,6 +64,7 @@ FastAPI 默认错误：
 
 - `400`：请求字段不合法。
 - `401`：App Key 无效。
+- `429`：聊天频率超过当前限流窗口。
 - `404`：用户、会话、模块等资源不存在。
 - `500`：服务异常，前端展示通用失败提示即可。
 
@@ -308,6 +309,22 @@ Response 重点字段：
 - `live`
 - `fallback`
 
+成功响应头会带：
+
+```http
+X-RateLimit-Limit: 12
+X-RateLimit-Remaining: 11
+X-RateLimit-Reset: 1760300000
+```
+
+如果超过当前窗口限制，会返回：
+
+```json
+{
+  "detail": "app chat rate limit exceeded"
+}
+```
+
 关闭本轮记忆抽取：
 
 ```json
@@ -385,6 +402,8 @@ events.addEventListener("done", (event) => {
 - `delta`
 - `memory`
 - `done`
+
+如果流式接口命中限流，会直接返回 `429`，并附带同样的 `X-RateLimit-*` 头。前端应做退避，不要立刻重建 `EventSource`。
 
 ## 5. 长期记忆
 
