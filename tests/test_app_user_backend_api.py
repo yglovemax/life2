@@ -113,6 +113,51 @@ def test_birth_profile_save_supports_bazi_snapshot():
     assert chart["chart_snapshot"]["pillars"]["year"] == "己巳"
 
 
+def test_chart_calculate_can_apply_simulated_bazi_algorithm_response():
+    user = create_user()
+
+    save_response = client.put(
+        f"/api/app/users/{user['id']}/birth-profile",
+        headers=APP_HEADERS,
+        json={
+            "nickname": "max",
+            "birth_date": "1989-09-29",
+            "birth_time": "16:00",
+            "birth_city": "兰州",
+            "birth_timezone": "Asia/Shanghai",
+            "chart_system": "bazi",
+        },
+    )
+    assert save_response.status_code == 200
+
+    calculate_response = client.post(
+        f"/api/app/users/{user['id']}/chart/calculate",
+        headers=APP_HEADERS,
+        json={
+            "chart_system": "bazi",
+            "simulate_algorithm_response": {
+                "bazi_profile": {
+                    "year_pillar": "己巳",
+                    "month_pillar": "癸酉",
+                    "day_pillar": "乙丑",
+                    "hour_pillar": "甲申",
+                    "day_master": "乙木",
+                }
+            },
+        },
+    )
+    assert calculate_response.status_code == 200
+    chart = calculate_response.json()
+    assert chart["meta"]["mode"] == "simulated"
+    assert chart["chart_snapshot"]["system_type"] == "bazi"
+    assert chart["chart_snapshot"]["day_master"] == "乙木"
+
+    detail_response = client.get(f"/api/app/users/{user['id']}/chart", headers=APP_HEADERS)
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["chart_snapshot"]["pillars"]["hour"] == "甲申"
+
+
 def test_chat_session_records_messages_in_order():
     user = create_user()
     session_response = client.post(

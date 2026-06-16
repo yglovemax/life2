@@ -52,8 +52,105 @@ def test_seeded_module_center_contains_phase_one_pages():
 
     assert "出生星盘解读页" in page_names
     assert "每日星座运势页" in page_names
+    assert "八字命盘解读页" in page_names
+    assert "八字每日运势页" in page_names
     assert "星盘详解" in module_names
     assert "每日寄语" in module_names
+    assert "日主与格局" in module_names
+    assert "今日行动建议" in module_names
+
+
+def test_bazi_knowledge_hits_can_rank_by_day_master_query():
+    create_older = client.post(
+        "/api/knowledge-sources",
+        json={
+            "title": "乙木事业规则",
+            "source_type": "markdown",
+            "content": "# 乙木\n乙木日主在事业推进上更适合先稳住节奏，再决定是否加码。",
+            "tags": ["八字", "事业"],
+        },
+    )
+    create_newer = client.post(
+        "/api/knowledge-sources",
+        json={
+            "title": "甲木事业规则",
+            "source_type": "markdown",
+            "content": "# 甲木\n甲木日主在事业推进上更适合先拉高目标，再逐步拆解执行。",
+            "tags": ["八字", "事业"],
+        },
+    )
+    assert create_older.status_code == 200
+    assert create_newer.status_code == 200
+
+    pages_response = client.get("/api/pages")
+    models_response = client.get("/api/models")
+    page_id = pages_response.json()["items"][0]["id"]
+    model_id = models_response.json()["items"][0]["id"]
+    slug = f"bazi-knowledge-test-{uuid4().hex}"
+
+    module_response = client.post(
+        "/api/modules",
+        json={
+            "page_id": page_id,
+            "model_id": model_id,
+            "slug": slug,
+            "name": "八字知识命中测试模块",
+            "owner": "算法",
+            "status": "draft",
+            "fallback_content": "备用内容",
+            "algorithm_fields": {"required": ["day_master"]},
+            "knowledge_tags": ["八字", "事业"],
+            "prompt": {
+                "shared_prefix": "共享规则",
+                "module_rules": "模块规则",
+                "algorithm_data_template": "算法模板",
+                "user_preferences_template": "偏好模板",
+                "final_request_template": "最终请求",
+            },
+            "fields": [
+                {
+                    "field_name": "summary",
+                    "purpose": "核心内容",
+                    "display_position": "测试卡片",
+                    "example": "这是一段示例",
+                    "source": "ai",
+                    "is_ai_generated": True,
+                    "is_required": True,
+                    "owner": "Prompt",
+                    "status": "draft",
+                    "change_log": "初始创建",
+                }
+            ],
+        },
+    )
+    assert module_response.status_code == 200
+    module_id = module_response.json()["id"]
+
+    trace_response = client.post(
+        f"/api/modules/{module_id}/test-run",
+        json={
+            "test_user": "demo_user_001",
+            "date": "2026-06-17",
+            "input_payload": {"day_master": "乙木"},
+        },
+    )
+    assert trace_response.status_code == 200
+    trace = trace_response.json()
+    assert trace["knowledge_hits"]
+    assert trace["knowledge_hits"][0]["title"] == "乙木"
+    assert "乙木日主" in trace["knowledge_hits"][0]["content"]
+
+
+def test_knowledge_taxonomy_exposes_bazi_dimensions():
+    response = client.get("/api/knowledge/taxonomy")
+    assert response.status_code == 200
+    data = response.json()
+    systems = {item["system"] for item in data["items"]}
+    assert "astrology" in systems
+    assert "bazi" in systems
+    bazi = next(item for item in data["items"] if item["system"] == "bazi")
+    assert "日主" in bazi["dimensions"]
+    assert "十神" in bazi["dimensions"]
 
 
 def test_module_detail_exposes_prompt_contracts_and_trace_columns():

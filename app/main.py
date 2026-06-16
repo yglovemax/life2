@@ -16,6 +16,7 @@ from app.services import (
     cost_summary,
     append_chat_message,
     cancel_training_run,
+    calculate_user_chart,
     create_chat_session,
     create_issue,
     create_knowledge_source,
@@ -34,6 +35,7 @@ from app.services import (
     get_module_detail,
     get_training_run,
     get_user_chart,
+    knowledge_taxonomy,
     import_github_knowledge_sources,
     list_app_api_keys,
     list_audit_events,
@@ -331,6 +333,31 @@ def app_user_chart(
     return chart
 
 
+@app.post("/api/app/users/{user_id}/chart/calculate")
+def app_user_chart_calculate(
+    user_id: int,
+    payload: dict,
+    app_auth: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    try:
+        chart = calculate_user_chart(session, user_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if chart is None:
+        raise HTTPException(status_code=404, detail="app user not found")
+    record_audit_event(
+        session,
+        event_type="app_chart_calculate",
+        actor=app_auth["name"],
+        target_type="app_user",
+        target_id=str(user_id),
+        severity="info",
+        details={"mode": (chart.get("meta") or {}).get("mode"), "system_type": (chart.get("chart_snapshot") or {}).get("system_type")},
+    )
+    return chart
+
+
 @app.post("/api/app/chat/sessions")
 def app_chat_session_create(
     payload: dict,
@@ -508,6 +535,11 @@ def knowledge_entry_create(payload: dict, session: Session = Depends(get_session
 @app.get("/api/knowledge-chunks")
 def knowledge_chunks(tag: str | None = None, source_id: int | None = None, session: Session = Depends(get_session)) -> dict:
     return {"items": list_knowledge_chunks(session, tag=tag, source_id=source_id)}
+
+
+@app.get("/api/knowledge/taxonomy")
+def knowledge_taxonomy_api() -> dict:
+    return {"items": knowledge_taxonomy()}
 
 
 @app.post("/api/knowledge/search")

@@ -46,6 +46,8 @@ POST /api/app/pages/{page_slug}/render
 
 - `birth-chart-reading`
 - `daily-horoscope`
+- `bazi-birth-reading`
+- `bazi-daily-reading`
 
 只会渲染状态为 `gray` 或 `live` 的模块，草稿、待测、停用和已回滚模块不会出现在 App 输出里。
 
@@ -178,3 +180,38 @@ App API 只允许读取已发布模块：
 - 混合资料返回 `system_type=hybrid`
 
 这版八字属于“输入型快照”，用于先接前端和算法结果，不代表完整八字排盘引擎已经上线。
+
+如果需要把上游八字算法结果写回当前用户，可调用：
+
+```http
+POST /api/app/users/{user_id}/chart/calculate
+```
+
+联调示例：
+
+```json
+{
+  "chart_system": "bazi",
+  "simulate_algorithm_response": {
+    "bazi_profile": {
+      "year_pillar": "己巳",
+      "month_pillar": "癸酉",
+      "day_pillar": "乙丑",
+      "hour_pillar": "甲申",
+      "day_master": "乙木"
+    }
+  }
+}
+```
+
+返回会包含：
+
+- 最新 `birth_profile`
+- 最新 `chart_snapshot`
+- `meta.mode`：`simulated`、`live` 或 `snapshot`
+
+生产接真实八字算法服务时，可配置：
+
+- `NEXA_BAZI_CALC_MODE=live`
+- `NEXA_BAZI_API_URL`
+- `NEXA_BAZI_API_TOKEN`

@@ -187,6 +187,14 @@ POST /api/training/runs/{run_id}/publish
 
 发布后会创建 `source_type=ai_training` 的正式知识源，并进入 `/api/knowledge/search` 检索环境。
 
+知识库推荐标签体系：
+
+```http
+GET /api/knowledge/taxonomy
+```
+
+当前返回占星和八字两套推荐维度，供后台训练中心、手工录入和后续上传流程直接复用。
+
 ## 用户资料、本命资料、聊天和记忆接口
 
 以下接口已实现，均使用 App Key 鉴权。
@@ -268,6 +276,25 @@ GET /api/app/users/{user_id}/chart
 - 占星仍是太阳星座基础快照。
 - 八字当前先接“输入型四柱事实”，方便和现有八字算法服务或人工录入结果对接。
 - 完整宫位、上升、相位，以及八字大运、流年、藏干、旺衰，后续由独立计算服务补齐。
+
+触发一次盘面计算 / 回写：
+
+```http
+POST /api/app/users/{user_id}/chart/calculate
+```
+
+当前支持三种模式：
+
+- `simulate_algorithm_response`：联调用，直接把八字算法结果写回用户资料
+- `NEXA_BAZI_CALC_MODE=live`：调用真实八字算法服务
+- 默认：不调远程，直接返回当前快照
+
+真实服务预留环境变量：
+
+- `NEXA_BAZI_CALC_MODE`
+- `NEXA_BAZI_API_URL`
+- `NEXA_BAZI_API_TOKEN`
+- `NEXA_BAZI_REQUEST_TIMEOUT_SECONDS`
 
 创建聊天会话：
 

@@ -237,6 +237,56 @@ Response：
 
 完整上升、宫位、相位，以及八字大运、流年、藏干、旺衰，后续由专门计算服务补上。
 
+### 触发一次盘面计算/回写
+
+```http
+POST /api/app/users/{user_id}/chart/calculate
+```
+
+用途：
+
+- 前端保存完出生资料后，触发一次后端盘面计算
+- 对接现有八字算法服务，把算法输出回写到用户资料
+- 本地或联调阶段，可直接传模拟算法结果
+
+联调示例：
+
+```json
+{
+  "chart_system": "bazi",
+  "simulate_algorithm_response": {
+    "bazi_profile": {
+      "year_pillar": "己巳",
+      "month_pillar": "癸酉",
+      "day_pillar": "乙丑",
+      "hour_pillar": "甲申",
+      "day_master": "乙木"
+    }
+  }
+}
+```
+
+Response 重点字段：
+
+```json
+{
+  "user_id": 1,
+  "birth_profile": {},
+  "chart_snapshot": {},
+  "warnings": [],
+  "meta": {
+    "mode": "simulated",
+    "provider": "bazi_calculator"
+  }
+}
+```
+
+说明：
+
+- `mode=simulated`：使用了 `simulate_algorithm_response`
+- `mode=live`：调用了真实八字算法服务
+- `mode=snapshot`：没有触发远程算法，直接返回当前快照
+
 ## 3. 聊天会话
 
 ### 创建聊天会话
@@ -571,6 +621,8 @@ POST /api/app/modules/{module_slug}/render
 
 - `birth-chart-reading`
 - `daily-horoscope`
+- `bazi-birth-reading`
+- `bazi-daily-reading`
 
 具体 module slug 可由后台模块中心或 `/api/modules` 查看。
 
@@ -580,9 +632,10 @@ POST /api/app/modules/{module_slug}/render
 
 1. `POST /api/app/users`
 2. `PUT /api/app/users/{user_id}/birth-profile`
-3. `GET /api/app/users/{user_id}/chart`
-4. `POST /api/app/chat/sessions`
-5. `GET /api/app/chat/sessions/{session_id}/stream`
+3. 如果是八字或混合体系，`POST /api/app/users/{user_id}/chart/calculate`
+4. `GET /api/app/users/{user_id}/chart`
+5. `POST /api/app/chat/sessions`
+6. `GET /api/app/chat/sessions/{session_id}/stream`
 
 再次进入：
 

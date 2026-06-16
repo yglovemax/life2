@@ -747,6 +747,23 @@ def list_knowledge_sources(session: Session) -> list[dict]:
     return [serialize_source(source) for source in sources]
 
 
+def knowledge_taxonomy() -> list[dict]:
+    return [
+        {
+            "system": "astrology",
+            "label": "西洋占星",
+            "dimensions": ["太阳星座", "月亮星座", "上升", "宫位", "相位", "元素", "模式", "主题"],
+            "recommended_tags": ["占星", "本命", "日运", "关系", "事业", "情绪", "成长"],
+        },
+        {
+            "system": "bazi",
+            "label": "八字",
+            "dimensions": ["四柱", "日主", "五行", "十神", "格局", "大运", "流年", "主题"],
+            "recommended_tags": ["八字", "四柱", "日主", "十神", "事业", "财运", "关系", "流年"],
+        },
+    ]
+
+
 def list_knowledge_chunks(session: Session, tag: str | None = None, source_id: int | None = None) -> list[dict]:
     chunks = session.scalars(select(KnowledgeChunk).order_by(KnowledgeChunk.created_at.desc())).all()
     rows = [serialize_chunk(chunk) for chunk in chunks]
@@ -780,17 +797,39 @@ def search_knowledge(session: Session, payload: dict) -> list[dict]:
 
 
 def retrieve_knowledge_hits(session: Session, tags: list, input_payload: dict, limit: int = 3) -> list[dict]:
-    query_terms = [
-        input_payload.get("sun_sign"),
-        input_payload.get("moon_sign"),
-        input_payload.get("rising_sign"),
-        input_payload.get("topic"),
-    ]
+    query_terms = knowledge_query_terms(input_payload)
     query = " ".join(str(term) for term in query_terms if term)
     hits = search_knowledge(session, {"query": query, "tags": tags, "limit": limit})
     if not hits and tags:
         hits = search_knowledge(session, {"query": "", "tags": tags, "limit": limit})
     return hits
+
+
+def knowledge_query_terms(input_payload: dict) -> list[str]:
+    bazi_profile = input_payload.get("bazi_profile") if isinstance(input_payload.get("bazi_profile"), dict) else {}
+    pillars = input_payload.get("pillars") if isinstance(input_payload.get("pillars"), dict) else {}
+    return [
+        input_payload.get("sun_sign"),
+        input_payload.get("moon_sign"),
+        input_payload.get("rising_sign"),
+        input_payload.get("topic"),
+        input_payload.get("chart_system"),
+        input_payload.get("system_type"),
+        input_payload.get("day_master"),
+        input_payload.get("year_pillar"),
+        input_payload.get("month_pillar"),
+        input_payload.get("day_pillar"),
+        input_payload.get("hour_pillar"),
+        bazi_profile.get("day_master"),
+        bazi_profile.get("year_pillar"),
+        bazi_profile.get("month_pillar"),
+        bazi_profile.get("day_pillar"),
+        bazi_profile.get("hour_pillar"),
+        pillars.get("year"),
+        pillars.get("month"),
+        pillars.get("day"),
+        pillars.get("hour"),
+    ]
 
 
 def serialize_source(source: KnowledgeSource) -> dict:
@@ -1519,6 +1558,52 @@ def get_user_chart(session: Session, user_id: int) -> dict | None:
     }
 
 
+def calculate_user_chart(session: Session, user_id: int, payload: dict) -> dict | None:
+    if any(key in (payload or {}) for key in {"nickname", "birth_date", "birth_time", "birth_city", "birth_country", "birth_timezone", "timezone", "latitude", "longitude", "chart_system", "bazi_profile"}):
+        saved = save_birth_profile(session, user_id, payload)
+        if saved is None:
+            return None
+
+    user = session.get(AppUser, user_id)
+    if user is None:
+        return None
+    profile = session.scalar(select(BirthProfile).where(BirthProfile.user_id == user.id))
+    if profile is None:
+        return {
+            "user_id": user.id,
+            "birth_profile": None,
+            "chart_snapshot": {},
+            "warnings": ["用户还没有保存本命资料。"],
+            "meta": {"mode": "snapshot", "provider": "local"},
+        }
+
+    requested_system = normalize_chart_system(payload.get("chart_system") or chart_system_from_profile(profile))
+    if requested_system in {"bazi", "hybrid"}:
+        if "simulate_algorithm_response" in payload:
+            apply_bazi_algorithm_result(profile, normalize_bazi_algorithm_payload(payload.get("simulate_algorithm_response"), requested_system))
+            meta = {"mode": "simulated", "provider": "bazi_calculator"}
+        elif should_call_live_bazi(payload):
+            provider_result = call_bazi_calculation_provider(profile, payload)
+            if provider_result.get("ok"):
+                apply_bazi_algorithm_result(profile, provider_result.get("payload") or {})
+                meta = {"mode": "live", "provider": "bazi_calculator"}
+            else:
+                meta = {
+                    "mode": "snapshot",
+                    "provider": "bazi_calculator",
+                    "fallback_reason": provider_result.get("fallback_reason") or "bazi_provider_error",
+                    "error": provider_result.get("error") or "",
+                }
+        else:
+            meta = {"mode": "snapshot", "provider": "local"}
+    else:
+        meta = {"mode": "snapshot", "provider": "local"}
+
+    chart = get_user_chart(session, user_id) or {"user_id": user_id, "birth_profile": None, "chart_snapshot": {}, "warnings": []}
+    chart["meta"] = meta
+    return chart
+
+
 def build_chart_snapshot(profile: BirthProfile) -> dict:
     system_type = chart_system_from_profile(profile)
     if system_type == "bazi":
@@ -1604,12 +1689,17 @@ def merge_birth_profile_payload(existing: dict, payload: dict) -> dict:
 
 def chart_system_from_profile(profile: BirthProfile) -> str:
     raw = profile.raw_payload or {}
-    system = str(raw.get("chart_system") or raw.get("reading_system") or "").strip().lower()
+    system = normalize_chart_system(raw.get("chart_system") or raw.get("reading_system") or "")
     if system in {"bazi", "hybrid", "astrology"}:
         return system
     if isinstance(raw.get("bazi_profile"), dict):
         return "bazi"
     return "astrology"
+
+
+def normalize_chart_system(value: str) -> str:
+    clean = str(value or "").strip().lower()
+    return clean if clean in {"astrology", "bazi", "hybrid"} else "astrology"
 
 
 def bazi_profile_from_profile(profile: BirthProfile) -> dict:
@@ -1633,6 +1723,91 @@ def bazi_pillars_from_profile(bazi_profile: dict) -> dict:
         "day": str(bazi_profile.get("day_pillar") or "").strip(),
         "hour": str(bazi_profile.get("hour_pillar") or "").strip(),
     }
+
+
+def normalize_bazi_algorithm_payload(value, requested_system: str = "bazi") -> dict:
+    if isinstance(value, str):
+        try:
+            payload = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError("simulate_algorithm_response 不是有效 JSON") from exc
+    elif isinstance(value, dict):
+        payload = value
+    else:
+        raise ValueError("simulate_algorithm_response 必须是 JSON 对象或 JSON 字符串")
+
+    bazi_profile = payload.get("bazi_profile") if isinstance(payload.get("bazi_profile"), dict) else payload
+    pillars = payload.get("pillars") if isinstance(payload.get("pillars"), dict) else {}
+    return {
+        "chart_system": normalize_chart_system(payload.get("chart_system") or requested_system),
+        "bazi_profile": {
+            "year_pillar": str(bazi_profile.get("year_pillar") or pillars.get("year") or "").strip(),
+            "month_pillar": str(bazi_profile.get("month_pillar") or pillars.get("month") or "").strip(),
+            "day_pillar": str(bazi_profile.get("day_pillar") or pillars.get("day") or "").strip(),
+            "hour_pillar": str(bazi_profile.get("hour_pillar") or pillars.get("hour") or "").strip(),
+            "day_master": str(bazi_profile.get("day_master") or "").strip(),
+            "five_elements": bazi_profile.get("five_elements") if isinstance(bazi_profile.get("five_elements"), dict) else {},
+            "ten_gods": bazi_profile.get("ten_gods") if isinstance(bazi_profile.get("ten_gods"), list) else [],
+        },
+    }
+
+
+def apply_bazi_algorithm_result(profile: BirthProfile, payload: dict) -> None:
+    merged_payload = merge_birth_profile_payload(profile.raw_payload or {}, payload)
+    merged_payload["chart_system"] = normalize_chart_system(payload.get("chart_system") or merged_payload.get("chart_system") or "bazi")
+    profile.raw_payload = merged_payload
+    profile.chart_snapshot = build_chart_snapshot(profile)
+    profile.updated_at = utc_now()
+    session = Session.object_session(profile)
+    if session is not None:
+        session.add(profile)
+        session.commit()
+        session.refresh(profile)
+
+
+def should_call_live_bazi(payload: dict) -> bool:
+    settings = get_settings()
+    return bool(payload.get("use_live_bazi")) or settings.bazi_calc_mode.lower() == "live"
+
+
+def call_bazi_calculation_provider(profile: BirthProfile, payload: dict) -> dict:
+    settings = get_settings()
+    if not settings.bazi_api_url:
+        return {"ok": False, "fallback_reason": "bazi_provider_missing", "error": "NEXA_BAZI_API_URL is not configured"}
+
+    request_body = {
+        "chart_system": normalize_chart_system(payload.get("chart_system") or chart_system_from_profile(profile)),
+        "birth_date": profile.birth_date,
+        "birth_time": profile.birth_time,
+        "birth_city": profile.birth_city,
+        "birth_country": profile.birth_country,
+        "birth_timezone": profile.birth_timezone,
+        "latitude": profile.latitude,
+        "longitude": profile.longitude,
+    }
+    headers = {"Content-Type": "application/json"}
+    if settings.bazi_api_token:
+        headers["Authorization"] = f"Bearer {settings.bazi_api_token}"
+    request = urllib.request.Request(
+        settings.bazi_api_url,
+        data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=settings.bazi_request_timeout_seconds) as response:
+            response_payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        return {"ok": False, "fallback_reason": "bazi_provider_error", "error": detail}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+        return {"ok": False, "fallback_reason": "bazi_provider_error", "error": str(error)}
+
+    try:
+        normalized = normalize_bazi_algorithm_payload(response_payload, request_body["chart_system"])
+    except ValueError as exc:
+        return {"ok": False, "fallback_reason": "bazi_provider_invalid_payload", "error": str(exc)}
+    return {"ok": True, "payload": normalized}
 
 
 def sun_sign_from_birth_date(value: str) -> str:

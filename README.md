@@ -23,6 +23,7 @@ Phase 1 已完成第一版闭环：
 - App 页面级 / 模块级 JSON API
 - 训练资料上传、GitHub 导入和 AI 训练草稿发布 API
 - 用户资料、本命资料、聊天会话、消息记录和长期记忆 API
+- 八字基础资料、四柱快照和八字聊天上下文支持
 - 聊天回复编排和 SSE 流式回复 API
 - 可配置对象存储 / 任务队列 / 限流运行时工厂
 - App 聊天接口限流和 `X-RateLimit-*` 响应头
@@ -41,6 +42,7 @@ Phase 2 已开始接入生产化底座：
 - 训练队列状态接口和取消接口
 - worker 命令入口
 - 运行时存储 / 队列 / 限流后端工厂
+- 八字算法服务 HTTP 接口占位和模拟接线
 
 ## 本地运行
 
@@ -83,6 +85,9 @@ export NEXA_DATABASE_URL=sqlite:///./data/nexa_admin.db
 export NEXA_REDIS_URL=redis://127.0.0.1:6379/0
 export NEXA_APP_CHAT_RATE_LIMIT_COUNT=12
 export NEXA_APP_CHAT_RATE_LIMIT_WINDOW_SECONDS=60
+export NEXA_BAZI_CALC_MODE=mock
+export NEXA_BAZI_API_URL=
+export NEXA_BAZI_API_TOKEN=
 ```
 
 注意：`NEXA_TASK_QUEUE_BACKEND=memory` 仅适合同进程本地开发。独立 worker 进程要消费任务，需要切到 Redis 后端。
