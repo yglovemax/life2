@@ -631,6 +631,7 @@ POST /api/app/modules/{module_slug}/render
 - 请求里传 `user_id` 后，后端会读取该用户保存的 `birth_profile`、`chart_snapshot` 和基础 `user_profile`
 - 占星快照会注入到 `input_payload.astrology_facts`，并补充 `sun_sign`
 - 八字快照会注入到 `input_payload.bazi_facts`、`bazi_profile`、`pillars`、`day_master`、`year_pillar`、`month_pillar`、`day_pillar`、`hour_pillar`
+- 带 `date` 的八字/混合渲染会补 `input_payload.daily_transit`，当前是稳定占位，后续可替换为真实流日/流月算法结果
 - 前端显式传入的同名字段优先生效；后端只补缺失字段
 
 因此前端常规调用只需要传用户 ID、日期和业务主题：
@@ -642,6 +643,25 @@ POST /api/app/modules/{module_slug}/render
   "input_payload": {
     "topic": "本命总览"
   }
+}
+```
+
+`daily_transit` 当前结构：
+
+```json
+{
+  "system_type": "bazi_daily",
+  "date": "2026-06-17",
+  "base_day_master": "乙木",
+  "base_pillars": {
+    "year": "己巳",
+    "month": "癸酉",
+    "day": "乙丑",
+    "hour": "甲申"
+  },
+  "calculation_level": "daily_transit_placeholder",
+  "source": "local_placeholder",
+  "warnings": ["当前版本尚未接入真实流日/流月计算服务，daily_transit 仅用于稳定接口和提示词上下文。"]
 }
 ```
 

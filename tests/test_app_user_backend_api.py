@@ -202,6 +202,52 @@ def test_bazi_page_render_enriches_modules_with_saved_chart_snapshot():
     assert input_payload["day_master"] == "乙木"
 
 
+def test_bazi_daily_page_render_enriches_date_and_daily_transit():
+    user = create_user()
+    client.put(
+        f"/api/app/users/{user['id']}/birth-profile",
+        headers=APP_HEADERS,
+        json={
+            "nickname": "max",
+            "birth_date": "1989-09-29",
+            "birth_time": "16:00",
+            "birth_city": "兰州",
+            "birth_timezone": "Asia/Shanghai",
+            "chart_system": "bazi",
+            "bazi_profile": {
+                "year_pillar": "己巳",
+                "month_pillar": "癸酉",
+                "day_pillar": "乙丑",
+                "hour_pillar": "甲申",
+                "day_master": "乙木",
+            },
+        },
+    )
+    modules = client.get("/api/modules").json()["items"]
+    daily_module = next(item for item in modules if item["slug"] == "bazi-daily-overview")
+    publish_response = client.post(f"/api/modules/{daily_module['id']}/publish", json={"status": "live", "operator": "qa"})
+    assert publish_response.status_code == 200
+
+    response = client.post(
+        "/api/app/pages/bazi-daily-reading/render",
+        headers=APP_HEADERS,
+        json={"user_id": user["id"], "date": "2026-06-17"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    rendered = next(item for item in data["modules"] if item["module"]["slug"] == "bazi-daily-overview")
+    trace_id = rendered["trace_id"]
+    traces = client.get("/api/call-traces?request_type=official").json()["items"]
+    trace = next(item for item in traces if item["id"] == trace_id)
+    input_payload = trace["input_payload"]["input_payload"]
+    assert input_payload["date"] == "2026-06-17"
+    assert input_payload["daily_transit"]["date"] == "2026-06-17"
+    assert input_payload["daily_transit"]["system_type"] == "bazi_daily"
+    assert input_payload["daily_transit"]["base_day_master"] == "乙木"
+    assert input_payload["daily_transit"]["calculation_level"] == "daily_transit_placeholder"
+
+
 def test_chat_session_records_messages_in_order():
     user = create_user()
     session_response = client.post(

@@ -86,7 +86,7 @@ curl -X POST http://127.0.0.1:8812/api/app/pages/birth-chart-reading/render \
 }
 ```
 
-说明：如果请求带数字 `user_id`，渲染前后端会自动读取该用户保存的本命资料和盘面快照，并把占星/八字事实补进 `input_payload`。八字页会自动获得 `bazi_facts`、`bazi_profile`、`pillars`、`day_master` 和四柱字段，前端不用每次重复拼四柱。
+说明：如果请求带数字 `user_id`，渲染前后端会自动读取该用户保存的本命资料和盘面快照，并把占星/八字事实补进 `input_payload`。八字页会自动获得 `bazi_facts`、`bazi_profile`、`pillars`、`day_master` 和四柱字段，前端不用每次重复拼四柱。带 `date` 渲染八字/混合页面时，还会补 `daily_transit` 基础日运上下文；真实流日算法接入后，可由前端或上游服务显式传入同名字段覆盖。
 
 ## 模块级 JSON API
 

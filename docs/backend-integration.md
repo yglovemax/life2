@@ -66,8 +66,11 @@ X-Nexa-API-Key: <app_api_key>
 - `chart_snapshot`：当前盘面快照
 - `astrology_facts` / `sun_sign`：占星基础事实
 - `bazi_facts` / `bazi_profile` / `pillars` / `day_master` / 四柱字段：八字基础事实
+- `daily_transit`：请求带 `date` 且盘面为八字/混合时自动补充的日运上下文
 
-前端团队不需要在每个模块调用里重复传四柱；如果确实要临时覆盖，可在 `input_payload` 里显式传同名字段。
+`daily_transit` 当前是 `daily_transit_placeholder`，用于让八字日运页先稳定对接。真实流日/流月算法接入后，可以由上游在 `input_payload.daily_transit` 显式传入并覆盖。
+
+前端团队不需要在每个模块调用里重复传四柱或基础日运上下文；如果确实要临时覆盖，可在 `input_payload` 里显式传同名字段。
 
 ## 知识库接口
 

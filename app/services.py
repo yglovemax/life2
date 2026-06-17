@@ -2374,6 +2374,9 @@ def sse_event(event: str, data: dict) -> str:
 def enrich_app_render_payload(session: Session, payload: dict) -> dict:
     enriched = dict(payload or {})
     input_payload = dict(enriched.get("input_payload") or {})
+    render_date = str(enriched.get("date") or input_payload.get("date") or "").strip()
+    if render_date:
+        input_payload.setdefault("date", render_date)
     try:
         user_id = nullable_int(enriched.get("user_id"))
     except (TypeError, ValueError):
@@ -2389,13 +2392,13 @@ def enrich_app_render_payload(session: Session, payload: dict) -> dict:
             input_payload.setdefault("birth_profile", chart.get("birth_profile"))
             input_payload.setdefault("chart_snapshot", chart_snapshot)
             input_payload.setdefault("chart_warnings", chart.get("warnings") or [])
-            enrich_chart_facts(input_payload, chart_snapshot)
+            enrich_chart_facts(input_payload, chart_snapshot, render_date)
 
     enriched["input_payload"] = input_payload
     return enriched
 
 
-def enrich_chart_facts(input_payload: dict, chart_snapshot: dict) -> None:
+def enrich_chart_facts(input_payload: dict, chart_snapshot: dict, render_date: str = "") -> None:
     system_type = chart_snapshot.get("system_type") or ""
     if system_type in {"astrology", "hybrid"} or chart_snapshot.get("sun_sign"):
         input_payload.setdefault("astrology_facts", chart_snapshot)
@@ -2411,6 +2414,8 @@ def enrich_chart_facts(input_payload: dict, chart_snapshot: dict) -> None:
         input_payload.setdefault("month_pillar", pillars.get("month") or "")
         input_payload.setdefault("day_pillar", pillars.get("day") or "")
         input_payload.setdefault("hour_pillar", pillars.get("hour") or "")
+        if render_date:
+            input_payload.setdefault("daily_transit", build_bazi_daily_transit(render_date, chart_snapshot))
 
 
 def bazi_profile_payload_from_snapshot(chart_snapshot: dict) -> dict:
@@ -2423,6 +2428,19 @@ def bazi_profile_payload_from_snapshot(chart_snapshot: dict) -> dict:
         "day_master": chart_snapshot.get("day_master") or "",
         "five_elements": chart_snapshot.get("five_elements") if isinstance(chart_snapshot.get("five_elements"), dict) else {},
         "ten_gods": chart_snapshot.get("ten_gods") if isinstance(chart_snapshot.get("ten_gods"), list) else [],
+    }
+
+
+def build_bazi_daily_transit(render_date: str, chart_snapshot: dict) -> dict:
+    pillars = chart_snapshot.get("pillars") if isinstance(chart_snapshot.get("pillars"), dict) else {}
+    return {
+        "system_type": "bazi_daily",
+        "date": render_date,
+        "base_day_master": chart_snapshot.get("day_master") or "",
+        "base_pillars": pillars,
+        "calculation_level": "daily_transit_placeholder",
+        "source": "local_placeholder",
+        "warnings": ["当前版本尚未接入真实流日/流月计算服务，daily_transit 仅用于稳定接口和提示词上下文。"],
     }
 
 
