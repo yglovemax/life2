@@ -36,6 +36,8 @@ class Settings(BaseModel):
     redis_url: str = Field(default_factory=lambda: os.environ.get("NEXA_REDIS_URL", ""))
     app_chat_rate_limit_count: int = Field(default_factory=lambda: env_int("NEXA_APP_CHAT_RATE_LIMIT_COUNT", 12))
     app_chat_rate_limit_window_seconds: int = Field(default_factory=lambda: env_int("NEXA_APP_CHAT_RATE_LIMIT_WINDOW_SECONDS", 60))
+    embedding_model: str = Field(default_factory=lambda: os.environ.get("NEXA_EMBEDDING_MODEL", "text-embedding-3-small"))
+    embedding_dimensions: int = Field(default_factory=lambda: env_int("NEXA_EMBEDDING_DIMENSIONS", 1536))
 
     @property
     def sqlite_path(self) -> Path | None:

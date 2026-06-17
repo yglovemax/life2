@@ -32,6 +32,14 @@
 GET /api/health
 ```
 
+运行时状态：
+
+```http
+GET /api/runtime/status
+```
+
+用于查看当前数据库后端、脱敏数据库 URL、连接状态，以及 PostgreSQL/pgvector 规划和安装状态。SQLite 本地开发会返回 `pgvector.planned=false`；生产切到 PostgreSQL 后，执行 Alembic 迁移会为 `knowledge_chunks` 和 `memory_items` 准备 `vector(1536)` embedding 列与 ivfflat cosine 索引。
+
 后台登录：
 
 ```http

@@ -6,7 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from app.core.settings import get_settings
-from app.db import get_session, init_db
+from app.db import database_runtime_status, get_session, init_db
 from app.platform.runtime import get_rate_limiter
 from app.models import AdminUser
 from app.seed import ensure_seed_data
@@ -209,6 +209,11 @@ def admin() -> FileResponse:
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok", "service": "nexa-ai-api-admin"}
+
+
+@app.get("/api/runtime/status")
+def runtime_status() -> dict:
+    return database_runtime_status()
 
 
 @app.post("/api/auth/login")

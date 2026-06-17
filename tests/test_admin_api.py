@@ -19,6 +19,17 @@ def test_health_reports_ok():
     assert response.json()["status"] == "ok"
 
 
+def test_runtime_status_exposes_database_and_pgvector_plan():
+    response = client.get("/api/runtime/status")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["database"]["backend"] in {"sqlite", "postgresql"}
+    assert "safe_url" in data["database"]
+    assert data["pgvector"]["extension"] == "vector"
+    assert data["pgvector"]["target_tables"] == ["knowledge_chunks", "memory_items"]
+
+
 def test_admin_login_returns_session_and_me_endpoint_resolves_user():
     login_response = client.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
     assert login_response.status_code == 200

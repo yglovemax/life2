@@ -1,6 +1,7 @@
 from collections.abc import Generator
 from functools import lru_cache
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.settings import get_settings
@@ -28,6 +29,50 @@ def get_session_factory():
 def reset_db_runtime() -> None:
     get_session_factory.cache_clear()
     get_engine.cache_clear()
+
+
+def database_runtime_status(check_connection: bool = True) -> dict:
+    settings = get_settings()
+    url = make_url(settings.database_url)
+    backend = url.get_backend_name()
+    normalized_backend = "postgresql" if backend.startswith("postgresql") else backend
+    pgvector_planned = normalized_backend == "postgresql"
+    status = {
+        "database": {
+            "backend": normalized_backend,
+            "driver": url.get_driver_name() or "",
+            "safe_url": url.render_as_string(hide_password=True),
+            "connected": None,
+            "error": "",
+        },
+        "pgvector": {
+            "planned": pgvector_planned,
+            "extension": "vector",
+            "installed": None,
+            "ready": False,
+            "dimensions": settings.embedding_dimensions,
+            "embedding_model": settings.embedding_model,
+            "target_tables": ["knowledge_chunks", "memory_items"],
+            "index_type": "ivfflat_cosine",
+        },
+    }
+    if not check_connection:
+        return status
+
+    try:
+        with get_engine().connect() as connection:
+            connection.execute(text("SELECT 1"))
+            status["database"]["connected"] = True
+            if pgvector_planned:
+                installed = bool(
+                    connection.execute(text("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')")).scalar()
+                )
+                status["pgvector"]["installed"] = installed
+                status["pgvector"]["ready"] = installed
+    except Exception as exc:  # pragma: no cover - environment-specific diagnostics
+        status["database"]["connected"] = False
+        status["database"]["error"] = str(exc)[:300]
+    return status
 
 
 def get_session() -> Generator[Session, None, None]:

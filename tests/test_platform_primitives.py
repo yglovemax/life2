@@ -1,5 +1,6 @@
 import pytest
 import types
+from pathlib import Path
 
 
 def test_local_object_storage_writes_bytes_and_blocks_path_escape(tmp_path):
@@ -101,6 +102,41 @@ def test_db_runtime_can_switch_database_url_after_reset(monkeypatch, tmp_path):
     finally:
         get_settings.cache_clear()
         reset_db_runtime()
+
+
+def test_database_runtime_status_parses_postgres_pgvector_plan(monkeypatch):
+    from app.core.settings import get_settings
+    from app.db import database_runtime_status, reset_db_runtime
+
+    monkeypatch.setenv("NEXA_DATABASE_URL", "postgresql+psycopg://nexa:secret@db.example.com:5432/nexa")
+    monkeypatch.setenv("NEXA_EMBEDDING_MODEL", "text-embedding-3-small")
+    monkeypatch.setenv("NEXA_EMBEDDING_DIMENSIONS", "1536")
+    get_settings.cache_clear()
+    reset_db_runtime()
+
+    try:
+        status = database_runtime_status(check_connection=False)
+        assert status["database"]["backend"] == "postgresql"
+        assert "secret" not in status["database"]["safe_url"]
+        assert status["pgvector"]["planned"] is True
+        assert status["pgvector"]["extension"] == "vector"
+        assert status["pgvector"]["dimensions"] == 1536
+        assert status["pgvector"]["target_tables"] == ["knowledge_chunks", "memory_items"]
+    finally:
+        get_settings.cache_clear()
+        reset_db_runtime()
+
+
+def test_pgvector_migration_declares_vector_columns_and_indexes():
+    migration = Path("alembic/versions/20260617_0002_pgvector_embeddings.py")
+
+    assert migration.exists()
+    content = migration.read_text(encoding="utf-8")
+    assert "CREATE EXTENSION IF NOT EXISTS vector" in content
+    assert "knowledge_chunks" in content
+    assert "memory_items" in content
+    assert "vector(1536)" in content
+    assert "ivfflat" in content
 
 
 def test_runtime_builds_redis_task_queue_and_rate_limiter(monkeypatch):

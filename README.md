@@ -38,6 +38,7 @@ Phase 2 已开始接入生产化底座：
 
 - Alembic 迁移入口
 - 数据库运行时工厂，可按 `NEXA_DATABASE_URL` 切换
+- PostgreSQL/pgvector 迁移占位和运行状态检查
 - 队列化训练运行
 - 聊天长期记忆摘要异步队列
 - 失败训练重试接口
@@ -90,6 +91,8 @@ export NEXA_APP_CHAT_RATE_LIMIT_WINDOW_SECONDS=60
 export NEXA_BAZI_CALC_MODE=mock
 export NEXA_BAZI_API_URL=
 export NEXA_BAZI_API_TOKEN=
+export NEXA_EMBEDDING_MODEL=text-embedding-3-small
+export NEXA_EMBEDDING_DIMENSIONS=1536
 ```
 
 注意：`NEXA_TASK_QUEUE_BACKEND=memory` 仅适合同进程本地开发。独立 worker 进程要消费任务，需要切到 Redis 后端。

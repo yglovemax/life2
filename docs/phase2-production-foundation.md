@@ -30,6 +30,13 @@
   - `python -m app.worker`
 - Alembic 初始化：
   - `alembic upgrade head`
+- PostgreSQL / pgvector 就绪层：
+  - `20260617_0002_pgvector_embeddings.py`
+  - PostgreSQL 下自动 `CREATE EXTENSION IF NOT EXISTS vector`
+  - 为 `knowledge_chunks` 和 `memory_items` 准备 `vector(1536)` embedding 列
+  - 准备 ivfflat cosine 索引
+- 运行时状态检查：
+  - `GET /api/runtime/status`
 
 ## 当前边界
 
@@ -39,6 +46,8 @@
   - `NEXA_REDIS_URL=...`
 - `RedisTaskQueue` 和 `RedisRateLimiter` 现在会复用同一个 Redis client，减少同进程重复建连。
 - 当前仓库已经把 worker 入口和任务协议接好了，但跨进程共享队列这一步还差真实 Redis 环境。
+- 当前 pgvector 迁移只在 PostgreSQL 方言下执行；SQLite 本地开发会跳过 vector 列。
+- 现在只完成 embedding 存储结构和状态检查，embedding 生成、写入和向量召回会在下一步接入。
 
 ## 训练异步化接口
 
@@ -127,6 +136,40 @@ GET /api/training/queue-status
 }
 ```
 
+## 数据库 / pgvector 状态
+
+```http
+GET /api/runtime/status
+```
+
+返回重点字段：
+
+```json
+{
+  "database": {
+    "backend": "postgresql",
+    "safe_url": "postgresql+psycopg://nexa:***@db:5432/nexa",
+    "connected": true
+  },
+  "pgvector": {
+    "planned": true,
+    "extension": "vector",
+    "installed": true,
+    "ready": true,
+    "dimensions": 1536,
+    "embedding_model": "text-embedding-3-small",
+    "target_tables": ["knowledge_chunks", "memory_items"],
+    "index_type": "ivfflat_cosine"
+  }
+}
+```
+
+相关环境变量：
+
+- `NEXA_DATABASE_URL`
+- `NEXA_EMBEDDING_MODEL`
+- `NEXA_EMBEDDING_DIMENSIONS`
+
 状态会经历：
 
 - `queued`
@@ -184,6 +227,6 @@ python -m app.worker
 ## 下一步
 
 - 把 `RedisTaskQueue` 和 `RedisRateLimiter` 接到真实 `NEXA_REDIS_URL`。
-- 加 Postgres 专用迁移和 pgvector 字段。
+- 接 embedding 生成、写入和向量召回。
 - 把训练失败重试和死信策略补上。
 - 把聊天记忆条目的落库也继续拆向异步批处理。
