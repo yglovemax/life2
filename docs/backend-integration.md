@@ -59,6 +59,16 @@ Authorization: Bearer <app_api_key>
 X-Nexa-API-Key: <app_api_key>
 ```
 
+渲染请求带数字 `user_id` 时，后端会自动把该用户的资料并入模块调用上下文：
+
+- `user_profile`：App 用户基础资料
+- `birth_profile`：保存过的出生/本命资料
+- `chart_snapshot`：当前盘面快照
+- `astrology_facts` / `sun_sign`：占星基础事实
+- `bazi_facts` / `bazi_profile` / `pillars` / `day_master` / 四柱字段：八字基础事实
+
+前端团队不需要在每个模块调用里重复传四柱；如果确实要临时覆盖，可在 `input_payload` 里显式传同名字段。
+
 ## 知识库接口
 
 Markdown / 手工知识：

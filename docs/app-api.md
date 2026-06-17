@@ -58,7 +58,7 @@ curl -X POST http://127.0.0.1:8812/api/app/pages/birth-chart-reading/render \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer dev-app-token" \
   -d '{
-    "user_id": "app_user_001",
+    "user_id": 1,
     "date": "2026-06-15",
     "input_payload": {
       "nickname": "max",
@@ -86,6 +86,8 @@ curl -X POST http://127.0.0.1:8812/api/app/pages/birth-chart-reading/render \
 }
 ```
 
+说明：如果请求带数字 `user_id`，渲染前后端会自动读取该用户保存的本命资料和盘面快照，并把占星/八字事实补进 `input_payload`。八字页会自动获得 `bazi_facts`、`bazi_profile`、`pillars`、`day_master` 和四柱字段，前端不用每次重复拼四柱。
+
 ## 模块级 JSON API
 
 ```http
@@ -99,7 +101,7 @@ curl -X POST http://127.0.0.1:8812/api/app/modules/birth-basic-chart-info/render
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer dev-app-token" \
   -d '{
-    "user_id": "app_user_001",
+    "user_id": 1,
     "date": "2026-06-15",
     "input_payload": {
       "nickname": "max",

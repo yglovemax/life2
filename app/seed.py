@@ -99,6 +99,125 @@ PAGE_SPECS = [
 ]
 
 
+def prompt_payload_for(page_spec: dict, module_name: str, module_slug: str) -> dict:
+    shared_prefix = "你是 Nexa 占卜 APP 的 AI 内容模块。保持温暖、清晰、克制，不做医疗、法律、投资等高风险承诺。"
+    module_rules = f"为「{page_spec['name']} / {module_name}」生成结构化内容，必须遵守字段契约，避免绝对化表达。"
+    if module_slug.startswith("bazi-"):
+        module_rules = (
+            f"为「{page_spec['name']} / {module_name}」生成结构化八字内容。"
+            "必须优先使用后端提供的八字、四柱、日主、五行、十神和流日事实；"
+            "缺失的盘面事实要明确标注为缺失，不要自行补造。"
+        )
+    return {
+        "shared_prefix": shared_prefix,
+        "module_rules": module_rules,
+        "algorithm_data_template": page_spec["algorithm_data_template"],
+        "user_preferences_template": "结合用户昵称、语气偏好、信息密度偏好，但只使用当前模块必要信息。",
+        "final_request_template": "请输出合法 JSON，不要 Markdown，不要额外解释。",
+    }
+
+
+def field_specs_for(page_spec: dict, module_name: str, module_slug: str) -> list[dict]:
+    specs = [
+        {
+            "field_name": "title",
+            "purpose": "模块标题或前端展示标题",
+            "display_position": f"{page_spec['name']} / {module_name}",
+            "example": module_name,
+            "source": "fixed_config",
+            "is_ai_generated": False,
+            "owner": "产品",
+        },
+        {
+            "field_name": "summary",
+            "purpose": "模块核心解读内容",
+            "display_position": f"{page_spec['name']} / {module_name}",
+            "example": f"这里展示{module_name}的核心解释。",
+            "source": "ai",
+            "is_ai_generated": True,
+            "owner": "Prompt",
+        },
+    ]
+    if module_slug == "bazi-day-master-pattern":
+        specs.extend(
+            [
+                {
+                    "field_name": "day_master",
+                    "purpose": "用户八字日主，来自后端盘面事实。",
+                    "display_position": f"{page_spec['name']} / {module_name}",
+                    "example": "乙木",
+                    "source": "algorithm",
+                    "is_ai_generated": False,
+                    "owner": "算法",
+                },
+                {
+                    "field_name": "pattern_summary",
+                    "purpose": "围绕日主、四柱和格局给出的核心判断。",
+                    "display_position": f"{page_spec['name']} / {module_name}",
+                    "example": "乙木日主重视生长、协作和持续调整，需要结合四柱旺衰判断表达方式。",
+                    "source": "ai",
+                    "is_ai_generated": True,
+                    "owner": "Prompt",
+                },
+                {
+                    "field_name": "strength_hint",
+                    "purpose": "日主强弱或当前可判断范围的提示。",
+                    "display_position": f"{page_spec['name']} / {module_name}",
+                    "example": "当前只提供四柱基础信息，旺衰判断需要大运、藏干和月令细化后确认。",
+                    "source": "ai",
+                    "is_ai_generated": True,
+                    "owner": "Prompt",
+                },
+                {
+                    "field_name": "action_advice",
+                    "purpose": "给用户的低风险行动建议。",
+                    "display_position": f"{page_spec['name']} / {module_name}",
+                    "example": "先把重点放在稳定节奏和持续输出上，避免一次性承担过多承诺。",
+                    "source": "ai",
+                    "is_ai_generated": True,
+                    "owner": "Prompt",
+                },
+            ]
+        )
+    elif module_slug.startswith("bazi-"):
+        specs.append(
+            {
+                "field_name": "action_advice",
+                "purpose": "基于八字事实生成的低风险行动建议。",
+                "display_position": f"{page_spec['name']} / {module_name}",
+                "example": "用一个小行动验证今天的节奏，不做重大承诺。",
+                "source": "ai",
+                "is_ai_generated": True,
+                "owner": "Prompt",
+            }
+        )
+    return specs
+
+
+def ensure_module_prompt(session: Session, module: Module, page_spec: dict, module_name: str, module_slug: str) -> None:
+    payload = prompt_payload_for(page_spec, module_name, module_slug)
+    if module.prompt is None:
+        session.add(PromptTemplate(module_id=module.id, **payload))
+        return
+    if module_slug.startswith("bazi-") and (
+        "八字" not in (module.prompt.module_rules or "") or "四柱" not in (module.prompt.algorithm_data_template or "")
+    ):
+        module.prompt.shared_prefix = payload["shared_prefix"]
+        module.prompt.module_rules = payload["module_rules"]
+        module.prompt.algorithm_data_template = payload["algorithm_data_template"]
+        module.prompt.user_preferences_template = payload["user_preferences_template"]
+        module.prompt.final_request_template = payload["final_request_template"]
+        module.prompt.version = (module.prompt.version or 1) + 1
+
+
+def ensure_field_contracts(session: Session, module: Module, page_spec: dict, module_name: str, module_slug: str) -> None:
+    existing_fields = {field.field_name for field in module.fields}
+    for spec in field_specs_for(page_spec, module_name, module_slug):
+        if spec["field_name"] in existing_fields:
+            continue
+        session.add(FieldContract(module_id=module.id, **spec))
+
+
 def ensure_seed_data(session: Session) -> None:
     ensure_admin_user(session)
     mini_model = ensure_model_config(
@@ -151,52 +270,15 @@ def ensure_seed_data(session: Session) -> None:
                 session.flush()
                 modules_by_slug[module.slug] = module
             else:
-                if not module.algorithm_fields:
+                if not module.algorithm_fields or module_slug.startswith("bazi-"):
                     module.algorithm_fields = page_spec["algorithm_fields"]
                 if not module.knowledge_tags:
                     module.knowledge_tags = unique_tags([*page_spec["system_tags"], page.name, module_name])
                 if not module.fallback_content:
                     module.fallback_content = f"{module_name}暂时使用备用内容，请稍后重试。"
 
-            if module.prompt is None:
-                session.add(
-                    PromptTemplate(
-                        module_id=module.id,
-                        shared_prefix="你是 Nexa 占卜 APP 的 AI 内容模块。保持温暖、清晰、克制，不做医疗、法律、投资等高风险承诺。",
-                        module_rules=f"为「{page.name} / {module_name}」生成结构化内容，必须遵守字段契约，避免绝对化表达。",
-                        algorithm_data_template=page_spec["algorithm_data_template"],
-                        user_preferences_template="结合用户昵称、语气偏好、信息密度偏好，但只使用当前模块必要信息。",
-                        final_request_template="请输出合法 JSON，不要 Markdown，不要额外解释。",
-                    )
-                )
-
-            existing_fields = {field.field_name for field in module.fields}
-            if "title" not in existing_fields:
-                session.add(
-                    FieldContract(
-                        module_id=module.id,
-                        field_name="title",
-                        purpose="模块标题或前端展示标题",
-                        display_position=f"{page.name} / {module_name}",
-                        example=module_name,
-                        source="fixed_config",
-                        is_ai_generated=False,
-                        owner="产品",
-                    )
-                )
-            if "summary" not in existing_fields:
-                session.add(
-                    FieldContract(
-                        module_id=module.id,
-                        field_name="summary",
-                        purpose="模块核心解读内容",
-                        display_position=f"{page.name} / {module_name}",
-                        example=f"这里展示{module_name}的核心解释。",
-                        source="ai",
-                        is_ai_generated=True,
-                        owner="Prompt",
-                    )
-                )
+            ensure_module_prompt(session, module, page_spec, module_name, module_slug)
+            ensure_field_contracts(session, module, page_spec, module_name, module_slug)
 
     session.commit()
 

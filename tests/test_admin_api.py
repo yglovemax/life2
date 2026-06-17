@@ -153,6 +153,19 @@ def test_knowledge_taxonomy_exposes_bazi_dimensions():
     assert "十神" in bazi["dimensions"]
 
 
+def test_bazi_seeded_modules_have_domain_specific_contracts_and_prompt():
+    modules = client.get("/api/modules").json()["items"]
+    bazi_module = next(item for item in modules if item["slug"] == "bazi-day-master-pattern")
+
+    detail = client.get(f"/api/modules/{bazi_module['id']}").json()
+    field_names = {field["field_name"] for field in detail["fields"]}
+
+    assert {"day_master", "pattern_summary", "strength_hint", "action_advice"}.issubset(field_names)
+    assert detail["algorithm_fields"]["required"] == ["user_profile", "birth_profile", "bazi_facts"]
+    assert "四柱" in detail["prompt"]["algorithm_data_template"]
+    assert "八字" in detail["prompt"]["module_rules"]
+
+
 def test_module_detail_exposes_prompt_contracts_and_trace_columns():
     list_response = client.get("/api/modules")
     module_id = list_response.json()["items"][0]["id"]

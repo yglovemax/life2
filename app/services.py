@@ -2371,6 +2371,61 @@ def sse_event(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+def enrich_app_render_payload(session: Session, payload: dict) -> dict:
+    enriched = dict(payload or {})
+    input_payload = dict(enriched.get("input_payload") or {})
+    try:
+        user_id = nullable_int(enriched.get("user_id"))
+    except (TypeError, ValueError):
+        user_id = None
+
+    if user_id is not None:
+        user = session.get(AppUser, user_id)
+        if user is not None:
+            input_payload.setdefault("user_profile", serialize_app_user(user))
+        chart = get_user_chart(session, user_id)
+        if chart is not None:
+            chart_snapshot = chart.get("chart_snapshot") or {}
+            input_payload.setdefault("birth_profile", chart.get("birth_profile"))
+            input_payload.setdefault("chart_snapshot", chart_snapshot)
+            input_payload.setdefault("chart_warnings", chart.get("warnings") or [])
+            enrich_chart_facts(input_payload, chart_snapshot)
+
+    enriched["input_payload"] = input_payload
+    return enriched
+
+
+def enrich_chart_facts(input_payload: dict, chart_snapshot: dict) -> None:
+    system_type = chart_snapshot.get("system_type") or ""
+    if system_type in {"astrology", "hybrid"} or chart_snapshot.get("sun_sign"):
+        input_payload.setdefault("astrology_facts", chart_snapshot)
+        input_payload.setdefault("sun_sign", chart_snapshot.get("sun_sign") or "")
+
+    if system_type in {"bazi", "hybrid"} or chart_snapshot.get("day_master") or chart_snapshot.get("pillars"):
+        pillars = chart_snapshot.get("pillars") if isinstance(chart_snapshot.get("pillars"), dict) else {}
+        input_payload.setdefault("bazi_facts", chart_snapshot)
+        input_payload.setdefault("bazi_profile", bazi_profile_payload_from_snapshot(chart_snapshot))
+        input_payload.setdefault("pillars", pillars)
+        input_payload.setdefault("day_master", chart_snapshot.get("day_master") or "")
+        input_payload.setdefault("year_pillar", pillars.get("year") or "")
+        input_payload.setdefault("month_pillar", pillars.get("month") or "")
+        input_payload.setdefault("day_pillar", pillars.get("day") or "")
+        input_payload.setdefault("hour_pillar", pillars.get("hour") or "")
+
+
+def bazi_profile_payload_from_snapshot(chart_snapshot: dict) -> dict:
+    pillars = chart_snapshot.get("pillars") if isinstance(chart_snapshot.get("pillars"), dict) else {}
+    return {
+        "year_pillar": pillars.get("year") or "",
+        "month_pillar": pillars.get("month") or "",
+        "day_pillar": pillars.get("day") or "",
+        "hour_pillar": pillars.get("hour") or "",
+        "day_master": chart_snapshot.get("day_master") or "",
+        "five_elements": chart_snapshot.get("five_elements") if isinstance(chart_snapshot.get("five_elements"), dict) else {},
+        "ten_gods": chart_snapshot.get("ten_gods") if isinstance(chart_snapshot.get("ten_gods"), list) else [],
+    }
+
+
 def render_app_module(session: Session, module_slug: str, payload: dict, request_id: str | None = None) -> dict | None:
     module = session.scalar(
         select(Module)
@@ -2381,7 +2436,8 @@ def render_app_module(session: Session, module_slug: str, payload: dict, request
         return None
 
     resolved_request_id = request_id or new_request_id()
-    trace_payload = {**payload, "request_id": resolved_request_id}
+    enriched_payload = enrich_app_render_payload(session, payload)
+    trace_payload = {**enriched_payload, "request_id": resolved_request_id}
     trace = run_module_trace(session, module, trace_payload, request_type="official", allow_model_override=False)
     return app_module_response(module, trace, resolved_request_id)
 
@@ -2400,10 +2456,11 @@ def render_app_page(session: Session, page_slug: str, payload: dict) -> dict | N
         return None
 
     request_id = new_request_id()
+    enriched_payload = enrich_app_render_payload(session, payload)
     modules = sorted((module for module in page.modules if module.status in APP_ACTIVE_STATUSES), key=lambda module: module.id)
     rendered_modules = []
     for module in modules:
-        trace = run_module_trace(session, module, {**payload, "request_id": request_id}, "official")
+        trace = run_module_trace(session, module, {**enriched_payload, "request_id": request_id}, "official")
         rendered_modules.append(app_module_response(module, trace, request_id))
     return {
         "request_id": request_id,

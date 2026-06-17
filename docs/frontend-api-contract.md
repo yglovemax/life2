@@ -626,6 +626,25 @@ POST /api/app/modules/{module_slug}/render
 
 具体 module slug 可由后台模块中心或 `/api/modules` 查看。
 
+渲染接口会自动合并用户上下文：
+
+- 请求里传 `user_id` 后，后端会读取该用户保存的 `birth_profile`、`chart_snapshot` 和基础 `user_profile`
+- 占星快照会注入到 `input_payload.astrology_facts`，并补充 `sun_sign`
+- 八字快照会注入到 `input_payload.bazi_facts`、`bazi_profile`、`pillars`、`day_master`、`year_pillar`、`month_pillar`、`day_pillar`、`hour_pillar`
+- 前端显式传入的同名字段优先生效；后端只补缺失字段
+
+因此前端常规调用只需要传用户 ID、日期和业务主题：
+
+```json
+{
+  "user_id": 1,
+  "date": "2026-06-17",
+  "input_payload": {
+    "topic": "本命总览"
+  }
+}
+```
+
 ## Recommended Flow
 
 首次进入：
