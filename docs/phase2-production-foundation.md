@@ -39,6 +39,7 @@
   - 知识片段创建时写入 `embedding_model`、`embedding_hash`、`embedding_payload`
   - 用户长期记忆创建时写入同样的 embedding 元数据
   - 本地默认使用确定性 mock embedding，便于测试和无密钥开发
+  - 支持 `NEXA_EMBEDDING_PROVIDER=openai` 调用 OpenAI `POST /embeddings`
   - `/api/knowledge/search` 在关键词分数不足时使用 mock embedding 相似度兜底排序
 - 运行时状态检查：
   - `GET /api/runtime/status`
@@ -52,7 +53,7 @@
 - `RedisTaskQueue` 和 `RedisRateLimiter` 现在会复用同一个 Redis client，减少同进程重复建连。
 - 当前仓库已经把 worker 入口和任务协议接好了，但跨进程共享队列这一步还差真实 Redis 环境。
 - 当前 pgvector 迁移只在 PostgreSQL 方言下执行；SQLite 本地开发会跳过 vector 列。
-- 当前 embedding provider 是 mock，不调用外部模型；真实 OpenAI embedding、pgvector ANN 查询和批量重建任务会在下一步接入。
+- 当前默认 embedding provider 是 mock，不调用外部模型；设置 `NEXA_EMBEDDING_PROVIDER=openai` 且配置 `NEXA_OPENAI_API_KEY` 后，会调用 OpenAI embedding 接口。pgvector ANN 查询和批量重建任务会在下一步接入。
 
 ## 训练异步化接口
 
@@ -163,6 +164,7 @@ GET /api/runtime/status
     "ready": true,
     "dimensions": 1536,
     "embedding_model": "text-embedding-3-small",
+    "embedding_provider": "openai",
     "target_tables": ["knowledge_chunks", "memory_items"],
     "index_type": "ivfflat_cosine"
   }
@@ -172,6 +174,7 @@ GET /api/runtime/status
 相关环境变量：
 
 - `NEXA_DATABASE_URL`
+- `NEXA_EMBEDDING_PROVIDER`
 - `NEXA_EMBEDDING_MODEL`
 - `NEXA_EMBEDDING_DIMENSIONS`
 
@@ -232,7 +235,6 @@ python -m app.worker
 ## 下一步
 
 - 把 `RedisTaskQueue` 和 `RedisRateLimiter` 接到真实 `NEXA_REDIS_URL`。
-- 接真实 OpenAI embedding provider。
 - 把 mock 相似度搜索升级为 PostgreSQL/pgvector ANN 查询。
 - 增加 embedding 批量重建和版本迁移任务。
 - 把训练失败重试和死信策略补上。

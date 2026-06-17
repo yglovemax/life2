@@ -52,6 +52,7 @@ def database_runtime_status(check_connection: bool = True) -> dict:
             "ready": False,
             "dimensions": settings.embedding_dimensions,
             "embedding_model": settings.embedding_model,
+            "embedding_provider": settings.embedding_provider,
             "target_tables": ["knowledge_chunks", "memory_items"],
             "index_type": "ivfflat_cosine",
         },

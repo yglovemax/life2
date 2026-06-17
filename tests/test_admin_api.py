@@ -27,6 +27,7 @@ def test_runtime_status_exposes_database_and_pgvector_plan():
     assert data["database"]["backend"] in {"sqlite", "postgresql"}
     assert "safe_url" in data["database"]
     assert data["pgvector"]["extension"] == "vector"
+    assert data["pgvector"]["embedding_provider"] in {"mock", "openai"}
     assert data["pgvector"]["target_tables"] == ["knowledge_chunks", "memory_items"]
 
 

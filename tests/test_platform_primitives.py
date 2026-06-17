@@ -1,5 +1,6 @@
 import pytest
 import types
+import json
 from pathlib import Path
 
 
@@ -137,6 +138,78 @@ def test_pgvector_migration_declares_vector_columns_and_indexes():
     assert "memory_items" in content
     assert "vector(1536)" in content
     assert "ivfflat" in content
+
+
+def test_openai_embedding_provider_sends_dimensions_and_normalizes_vector(monkeypatch):
+    from app.core.settings import get_settings
+    from app.services import build_text_embedding_payload
+
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "data": [{"embedding": [0.1, 0.2, 0.3]}],
+                    "usage": {"prompt_tokens": 8, "total_tokens": 8},
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["url"] = request.full_url
+        captured["headers"] = dict(request.header_items())
+        captured["timeout"] = timeout
+        captured["body"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse()
+
+    monkeypatch.setattr("app.services.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setenv("NEXA_EMBEDDING_PROVIDER", "openai")
+    monkeypatch.setenv("NEXA_OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("NEXA_OPENAI_BASE_URL", "https://api.openai.test/v1")
+    monkeypatch.setenv("NEXA_EMBEDDING_MODEL", "text-embedding-3-small")
+    monkeypatch.setenv("NEXA_EMBEDDING_DIMENSIONS", "3")
+    get_settings.cache_clear()
+
+    try:
+        payload = build_text_embedding_payload("月亮代表情绪安全感")
+        assert captured["url"] == "https://api.openai.test/v1/embeddings"
+        assert captured["headers"]["Authorization"] == "Bearer sk-test"
+        assert captured["body"] == {
+            "model": "text-embedding-3-small",
+            "input": "月亮代表情绪安全感",
+            "dimensions": 3,
+        }
+        assert captured["timeout"] == 45
+        assert payload["provider"] == "openai"
+        assert payload["model"] == "text-embedding-3-small"
+        assert payload["dimensions"] == 3
+        assert payload["vector"] == [0.1, 0.2, 0.3]
+        assert payload["usage"]["total_tokens"] == 8
+    finally:
+        get_settings.cache_clear()
+
+
+def test_openai_embedding_provider_without_key_falls_back_to_mock(monkeypatch):
+    from app.core.settings import get_settings
+    from app.services import build_text_embedding_payload
+
+    monkeypatch.setenv("NEXA_EMBEDDING_PROVIDER", "openai")
+    monkeypatch.delenv("NEXA_OPENAI_API_KEY", raising=False)
+    get_settings.cache_clear()
+
+    try:
+        payload = build_text_embedding_payload("用户喜欢稳定回应")
+        assert payload["provider"] == "mock"
+        assert payload["fallback_reason"] == "openai_api_key_missing"
+        assert payload["features"]
+    finally:
+        get_settings.cache_clear()
 
 
 def test_runtime_builds_redis_task_queue_and_rate_limiter(monkeypatch):

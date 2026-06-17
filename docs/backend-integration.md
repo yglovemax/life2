@@ -107,7 +107,16 @@ POST /api/knowledge/search
 }
 ```
 
-`POST /api/knowledge/search` 当前同时计算关键词/tag 分数和 mock embedding 相似度；命中结果会返回 `semantic_score`。生产接真实 embedding 后，这条接口会升级为 pgvector ANN 查询，接口形状不变。
+`POST /api/knowledge/search` 当前同时计算关键词/tag 分数和 embedding 相似度；命中结果会返回 `semantic_score`。默认 provider 是 `mock`，生产可设置：
+
+```bash
+export NEXA_EMBEDDING_PROVIDER=openai
+export NEXA_OPENAI_API_KEY=<openai_api_key>
+export NEXA_EMBEDDING_MODEL=text-embedding-3-small
+export NEXA_EMBEDDING_DIMENSIONS=1536
+```
+
+OpenAI provider 会调用官方 `POST /embeddings` 接口，发送 `model`、`input`、`dimensions`。后续接 pgvector ANN 查询时，接口形状不变。
 
 训练资料上传：
 

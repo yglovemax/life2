@@ -884,6 +884,19 @@ def apply_text_embedding(record, text: str) -> None:
 def build_text_embedding_payload(text: str) -> dict:
     settings = get_settings()
     clean = " ".join(str(text or "").strip().lower().split())
+    if settings.embedding_provider.strip().lower() == "openai":
+        provider_payload = call_openai_embedding_provider(clean)
+        if provider_payload.get("ok"):
+            return provider_payload["payload"]
+        mock_payload = build_mock_embedding_payload(clean)
+        mock_payload["fallback_reason"] = provider_payload.get("fallback_reason") or "openai_embedding_error"
+        mock_payload["provider_error"] = provider_payload.get("error") or ""
+        return mock_payload
+    return build_mock_embedding_payload(clean)
+
+
+def build_mock_embedding_payload(clean: str) -> dict:
+    settings = get_settings()
     features = embedding_features(clean)
     digest = hashlib.sha256(f"{settings.embedding_model}\n{clean}".encode("utf-8")).hexdigest()
     return {
@@ -893,6 +906,56 @@ def build_text_embedding_payload(text: str) -> dict:
         "dimensions": settings.embedding_dimensions,
         "hash": digest,
         "features": features,
+    }
+
+
+def call_openai_embedding_provider(clean: str) -> dict:
+    settings = get_settings()
+    if not settings.openai_api_key:
+        return {"ok": False, "fallback_reason": "openai_api_key_missing", "error": "NEXA_OPENAI_API_KEY is not configured"}
+    if not clean:
+        return {"ok": False, "fallback_reason": "empty_embedding_input", "error": "embedding input is empty"}
+
+    endpoint = settings.openai_base_url.rstrip("/") + "/embeddings"
+    request_body = {
+        "model": settings.embedding_model,
+        "input": clean,
+        "dimensions": settings.embedding_dimensions,
+    }
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {settings.openai_api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=settings.model_request_timeout_seconds) as response:
+            response_payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        return {"ok": False, "fallback_reason": "openai_embedding_error", "error": detail}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+        return {"ok": False, "fallback_reason": "openai_embedding_error", "error": str(error)}
+
+    embedding = ((response_payload.get("data") or [{}])[0] or {}).get("embedding")
+    if not isinstance(embedding, list) or not embedding:
+        return {"ok": False, "fallback_reason": "openai_embedding_empty", "error": "OpenAI embedding response did not include a vector"}
+    vector = [float(value) for value in embedding]
+    digest = hashlib.sha256(json.dumps(vector, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return {
+        "ok": True,
+        "payload": {
+            "status": "ready",
+            "provider": "openai",
+            "model": response_payload.get("model") or settings.embedding_model,
+            "dimensions": len(vector),
+            "hash": digest,
+            "vector": vector,
+            "usage": response_payload.get("usage") or {},
+        },
     }
 
 
@@ -913,6 +976,10 @@ def embedding_features(text: str) -> dict:
 
 
 def embedding_similarity(left: dict, right: dict) -> float:
+    left_vector = left.get("vector") if isinstance(left.get("vector"), list) else []
+    right_vector = right.get("vector") if isinstance(right.get("vector"), list) else []
+    if left_vector and right_vector:
+        return vector_cosine_similarity(left_vector, right_vector)
     left_features = left.get("features") if isinstance(left.get("features"), dict) else {}
     right_features = right.get("features") if isinstance(right.get("features"), dict) else {}
     if not left_features or not right_features:
@@ -921,6 +988,20 @@ def embedding_similarity(left: dict, right: dict) -> float:
     numerator = sum(float(left_features[key]) * float(right_features[key]) for key in shared)
     left_norm = sum(float(value) * float(value) for value in left_features.values()) ** 0.5
     right_norm = sum(float(value) * float(value) for value in right_features.values()) ** 0.5
+    if not left_norm or not right_norm:
+        return 0.0
+    return numerator / (left_norm * right_norm)
+
+
+def vector_cosine_similarity(left: list, right: list) -> float:
+    size = min(len(left), len(right))
+    if not size:
+        return 0.0
+    left_values = [float(value) for value in left[:size]]
+    right_values = [float(value) for value in right[:size]]
+    numerator = sum(left_values[index] * right_values[index] for index in range(size))
+    left_norm = sum(value * value for value in left_values) ** 0.5
+    right_norm = sum(value * value for value in right_values) ** 0.5
     if not left_norm or not right_norm:
         return 0.0
     return numerator / (left_norm * right_norm)

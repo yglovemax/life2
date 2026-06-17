@@ -38,6 +38,7 @@ class Settings(BaseModel):
     app_chat_rate_limit_window_seconds: int = Field(default_factory=lambda: env_int("NEXA_APP_CHAT_RATE_LIMIT_WINDOW_SECONDS", 60))
     embedding_model: str = Field(default_factory=lambda: os.environ.get("NEXA_EMBEDDING_MODEL", "text-embedding-3-small"))
     embedding_dimensions: int = Field(default_factory=lambda: env_int("NEXA_EMBEDDING_DIMENSIONS", 1536))
+    embedding_provider: str = Field(default_factory=lambda: os.environ.get("NEXA_EMBEDDING_PROVIDER", "mock"))
 
     @property
     def sqlite_path(self) -> Path | None:
