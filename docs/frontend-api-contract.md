@@ -597,11 +597,20 @@ Response：
       "memory_type": "preference",
       "content": "用户喜欢先给结论再解释。",
       "tags": ["偏好", "表达"],
-      "importance": 4
+      "importance": 4,
+      "embedding": {
+        "status": "ready",
+        "model": "text-embedding-3-small",
+        "hash": "...",
+        "dimensions": 1536,
+        "provider": "mock"
+      }
     }
   ]
 }
 ```
+
+`embedding` 当前是后端本地 mock 元数据，用于后续记忆召回和 pgvector 接入；前端展示时可以忽略。
 
 ## 6. App 页面/模块渲染
 

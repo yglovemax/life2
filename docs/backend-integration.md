@@ -92,6 +92,23 @@ GET /api/knowledge-chunks
 POST /api/knowledge/search
 ```
 
+知识片段创建后会自动生成本地 mock embedding 元数据，返回的 chunk 会包含：
+
+```json
+{
+  "embedding": {
+    "status": "ready",
+    "model": "text-embedding-3-small",
+    "hash": "...",
+    "dimensions": 1536,
+    "provider": "mock"
+  },
+  "semantic_score": 0
+}
+```
+
+`POST /api/knowledge/search` 当前同时计算关键词/tag 分数和 mock embedding 相似度；命中结果会返回 `semantic_score`。生产接真实 embedding 后，这条接口会升级为 pgvector ANN 查询，接口形状不变。
+
 训练资料上传：
 
 ```http

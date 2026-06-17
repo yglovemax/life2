@@ -305,3 +305,25 @@ def test_memory_summary_and_items_are_listed_for_user():
     assert data["summary"]["summary"].startswith("用户偏好")
     assert data["items"][0]["memory_type"] == "preference"
     assert "表达" in data["items"][0]["tags"]
+
+
+def test_memory_item_stores_embedding_metadata():
+    user = create_user()
+
+    item_response = client.post(
+        f"/api/app/users/{user['id']}/memories",
+        headers=APP_HEADERS,
+        json={
+            "memory_type": "preference",
+            "content": "用户在关系问题里更在意稳定回应和安全感。",
+            "tags": ["关系", "安全感"],
+            "importance": 5,
+        },
+    )
+
+    assert item_response.status_code == 200
+    item = item_response.json()
+    assert item["embedding"]["status"] == "ready"
+    assert item["embedding"]["model"] == "text-embedding-3-small"
+    assert item["embedding"]["dimensions"] == 1536
+    assert item["embedding"]["hash"]

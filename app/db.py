@@ -117,6 +117,16 @@ def ensure_sqlite_columns() -> None:
             statements.append("ALTER TABLE training_runs ADD COLUMN task_id TEXT DEFAULT ''")
         if "request_payload" not in training_existing:
             statements.append("ALTER TABLE training_runs ADD COLUMN request_payload JSON DEFAULT '{}'")
+    for table_name in ["knowledge_chunks", "memory_items"]:
+        if table_name not in table_names:
+            continue
+        table_existing = {column["name"] for column in inspector.get_columns(table_name)}
+        if "embedding_model" not in table_existing:
+            statements.append(f"ALTER TABLE {table_name} ADD COLUMN embedding_model TEXT DEFAULT ''")
+        if "embedding_hash" not in table_existing:
+            statements.append(f"ALTER TABLE {table_name} ADD COLUMN embedding_hash TEXT DEFAULT ''")
+        if "embedding_payload" not in table_existing:
+            statements.append(f"ALTER TABLE {table_name} ADD COLUMN embedding_payload JSON DEFAULT '{{}}'")
     if not statements:
         return
     with engine.begin() as connection:

@@ -196,15 +196,15 @@ def create_knowledge_source(session: Session, payload: dict) -> dict:
 
     chunks = chunk_markdown(title, content)
     for index, chunk in enumerate(chunks, start=1):
-        session.add(
-            KnowledgeChunk(
-                source_id=source.id,
-                title=chunk["title"],
-                content=chunk["content"],
-                tags=tags,
-                chunk_index=index,
-            )
+        chunk_model = KnowledgeChunk(
+            source_id=source.id,
+            title=chunk["title"],
+            content=chunk["content"],
+            tags=tags,
+            chunk_index=index,
         )
+        apply_text_embedding(chunk_model, f"{chunk_model.title}\n{chunk_model.content}")
+        session.add(chunk_model)
     source.chunk_count = len(chunks)
     session.commit()
     session.refresh(source)
@@ -778,20 +778,25 @@ def search_knowledge(session: Session, payload: dict) -> list[dict]:
     query = (payload.get("query") or "").strip().lower()
     tags = normalize_tags(payload.get("tags") or [])
     limit = int(payload.get("limit") or 8)
-    chunks = list_knowledge_chunks(session)
-    scored: list[tuple[int, dict]] = []
+    chunks = session.scalars(select(KnowledgeChunk).order_by(KnowledgeChunk.created_at.desc())).all()
+    query_embedding = build_text_embedding_payload(query) if query else {}
+    scored: list[tuple[float, dict]] = []
     for chunk in chunks:
-        if tags and not set(tags).intersection(set(chunk["tags"])):
+        chunk_tags = chunk.tags or []
+        if tags and not set(tags).intersection(set(chunk_tags)):
             continue
-        haystack = f"{chunk['title']}\n{chunk['content']}".lower()
-        score = 0
+        haystack = f"{chunk.title}\n{chunk.content}".lower()
+        lexical_score = 0
         if query and query in haystack:
-            score += 5
-        score += len(set(tags).intersection(set(chunk["tags"])))
-        if not query and score == 0 and tags:
-            score = 1
-        if score > 0 or (not query and not tags):
-            scored.append((score, chunk))
+            lexical_score += 5
+        lexical_score += len(set(tags).intersection(set(chunk_tags)))
+        if not query and lexical_score == 0 and tags:
+            lexical_score = 1
+        semantic_score = embedding_similarity(query_embedding, chunk.embedding_payload or {}) if query_embedding else 0.0
+        if lexical_score > 0 or semantic_score > 0.05 or (not query and not tags):
+            row = serialize_chunk(chunk)
+            row["semantic_score"] = round(semantic_score, 6)
+            scored.append((float(lexical_score) + semantic_score, row))
     scored.sort(key=lambda item: item[0], reverse=True)
     return [chunk for _, chunk in scored[:limit]]
 
@@ -852,8 +857,73 @@ def serialize_chunk(chunk: KnowledgeChunk) -> dict:
         "content": chunk.content,
         "tags": chunk.tags,
         "chunk_index": chunk.chunk_index,
+        "embedding": serialize_embedding_meta(chunk),
+        "semantic_score": 0,
         "created_at": chunk.created_at.isoformat(),
     }
+
+
+def serialize_embedding_meta(record) -> dict:
+    payload = record.embedding_payload or {}
+    return {
+        "status": "ready" if payload else "missing",
+        "model": record.embedding_model or payload.get("model") or "",
+        "hash": record.embedding_hash or payload.get("hash") or "",
+        "dimensions": int(payload.get("dimensions") or get_settings().embedding_dimensions),
+        "provider": payload.get("provider") or ("mock" if payload else ""),
+    }
+
+
+def apply_text_embedding(record, text: str) -> None:
+    payload = build_text_embedding_payload(text)
+    record.embedding_payload = payload
+    record.embedding_model = payload["model"]
+    record.embedding_hash = payload["hash"]
+
+
+def build_text_embedding_payload(text: str) -> dict:
+    settings = get_settings()
+    clean = " ".join(str(text or "").strip().lower().split())
+    features = embedding_features(clean)
+    digest = hashlib.sha256(f"{settings.embedding_model}\n{clean}".encode("utf-8")).hexdigest()
+    return {
+        "status": "ready",
+        "provider": "mock",
+        "model": settings.embedding_model,
+        "dimensions": settings.embedding_dimensions,
+        "hash": digest,
+        "features": features,
+    }
+
+
+def embedding_features(text: str) -> dict:
+    normalized = "".join(char if char.isalnum() else " " for char in text.lower())
+    features: dict[str, float] = {}
+    for word in normalized.split():
+        terms = [word]
+        if len(word) > 1:
+            terms.extend(word[index : index + 2] for index in range(len(word) - 1))
+        if len(word) > 2:
+            terms.extend(word[index : index + 3] for index in range(len(word) - 2))
+        terms.extend(char for char in word if char.strip())
+        for term in terms:
+            key = hashlib.sha1(term.encode("utf-8")).hexdigest()[:12]
+            features[key] = features.get(key, 0.0) + 1.0
+    return features
+
+
+def embedding_similarity(left: dict, right: dict) -> float:
+    left_features = left.get("features") if isinstance(left.get("features"), dict) else {}
+    right_features = right.get("features") if isinstance(right.get("features"), dict) else {}
+    if not left_features or not right_features:
+        return 0.0
+    shared = set(left_features).intersection(right_features)
+    numerator = sum(float(left_features[key]) * float(right_features[key]) for key in shared)
+    left_norm = sum(float(value) * float(value) for value in left_features.values()) ** 0.5
+    right_norm = sum(float(value) * float(value) for value in right_features.values()) ** 0.5
+    if not left_norm or not right_norm:
+        return 0.0
+    return numerator / (left_norm * right_norm)
 
 
 def normalize_tags(tags: list | str) -> list[str]:
@@ -1921,6 +1991,7 @@ def create_memory_item(session: Session, user_id: int, payload: dict) -> dict | 
         importance=clamp_int(payload.get("importance"), 1, 5, 3),
         status=(payload.get("status") or "active").strip(),
     )
+    apply_text_embedding(item, f"{item.memory_type}\n{item.content}")
     session.add(item)
     session.commit()
     session.refresh(item)
@@ -2030,6 +2101,7 @@ def serialize_memory_item(item: MemoryItem) -> dict:
         "tags": item.tags or [],
         "importance": item.importance,
         "status": item.status,
+        "embedding": serialize_embedding_meta(item),
         "created_at": item.created_at.isoformat(),
         "updated_at": item.updated_at.isoformat(),
     }

@@ -497,6 +497,46 @@ def test_markdown_knowledge_source_upload_chunks_and_searches_by_tag():
     assert any("行动力" in item["content"] for item in results)
 
 
+def test_knowledge_chunks_store_mock_embeddings_and_semantic_search_fallback():
+    relevant = client.post(
+        "/api/knowledge-sources",
+        json={
+            "title": "月亮安全感规则",
+            "source_type": "markdown",
+            "content": "# 月亮\n月亮代表情绪安全感，亲密关系里需要稳定回应。",
+            "tags": ["占星", "关系"],
+        },
+    )
+    unrelated = client.post(
+        "/api/knowledge-sources",
+        json={
+            "title": "火星行动规则",
+            "source_type": "markdown",
+            "content": "# 火星\n火星代表行动冲劲，适合用于解释目标推进方式。",
+            "tags": ["占星", "关系"],
+        },
+    )
+    assert relevant.status_code == 200
+    assert unrelated.status_code == 200
+
+    chunks_response = client.get(f"/api/knowledge-chunks?source_id={relevant.json()['id']}")
+    assert chunks_response.status_code == 200
+    chunk = chunks_response.json()["items"][0]
+    assert chunk["embedding"]["status"] == "ready"
+    assert chunk["embedding"]["model"] == "text-embedding-3-small"
+    assert chunk["embedding"]["dimensions"] == 1536
+    assert chunk["embedding"]["hash"]
+
+    search_response = client.post(
+        "/api/knowledge/search",
+        json={"query": "稳定安全", "tags": ["占星", "关系"], "limit": 1},
+    )
+    assert search_response.status_code == 200
+    results = search_response.json()["items"]
+    assert results[0]["title"] == "月亮"
+    assert results[0]["semantic_score"] > 0
+
+
 def test_manual_knowledge_entry_can_be_created_and_listed():
     response = client.post(
         "/api/knowledge-entries",

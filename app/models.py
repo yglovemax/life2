@@ -245,6 +245,9 @@ class KnowledgeChunk(Base):
     content: Mapped[str] = mapped_column(Text, default="")
     tags: Mapped[list] = mapped_column(JSON, default=list)
     chunk_index: Mapped[int] = mapped_column(Integer, default=0)
+    embedding_model: Mapped[str] = mapped_column(String(120), default="")
+    embedding_hash: Mapped[str] = mapped_column(String(80), default="", index=True)
+    embedding_payload: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     source: Mapped[KnowledgeSource] = relationship(back_populates="chunks")
@@ -389,6 +392,9 @@ class MemoryItem(Base):
     tags: Mapped[list] = mapped_column(JSON, default=list)
     importance: Mapped[int] = mapped_column(Integer, default=3)
     status: Mapped[str] = mapped_column(String(40), default="active", index=True)
+    embedding_model: Mapped[str] = mapped_column(String(120), default="")
+    embedding_hash: Mapped[str] = mapped_column(String(80), default="", index=True)
+    embedding_payload: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 

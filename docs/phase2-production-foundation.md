@@ -35,6 +35,11 @@
   - PostgreSQL 下自动 `CREATE EXTENSION IF NOT EXISTS vector`
   - 为 `knowledge_chunks` 和 `memory_items` 准备 `vector(1536)` embedding 列
   - 准备 ivfflat cosine 索引
+- Embedding 入库第一版：
+  - 知识片段创建时写入 `embedding_model`、`embedding_hash`、`embedding_payload`
+  - 用户长期记忆创建时写入同样的 embedding 元数据
+  - 本地默认使用确定性 mock embedding，便于测试和无密钥开发
+  - `/api/knowledge/search` 在关键词分数不足时使用 mock embedding 相似度兜底排序
 - 运行时状态检查：
   - `GET /api/runtime/status`
 
@@ -47,7 +52,7 @@
 - `RedisTaskQueue` 和 `RedisRateLimiter` 现在会复用同一个 Redis client，减少同进程重复建连。
 - 当前仓库已经把 worker 入口和任务协议接好了，但跨进程共享队列这一步还差真实 Redis 环境。
 - 当前 pgvector 迁移只在 PostgreSQL 方言下执行；SQLite 本地开发会跳过 vector 列。
-- 现在只完成 embedding 存储结构和状态检查，embedding 生成、写入和向量召回会在下一步接入。
+- 当前 embedding provider 是 mock，不调用外部模型；真实 OpenAI embedding、pgvector ANN 查询和批量重建任务会在下一步接入。
 
 ## 训练异步化接口
 
@@ -227,6 +232,8 @@ python -m app.worker
 ## 下一步
 
 - 把 `RedisTaskQueue` 和 `RedisRateLimiter` 接到真实 `NEXA_REDIS_URL`。
-- 接 embedding 生成、写入和向量召回。
+- 接真实 OpenAI embedding provider。
+- 把 mock 相似度搜索升级为 PostgreSQL/pgvector ANN 查询。
+- 增加 embedding 批量重建和版本迁移任务。
 - 把训练失败重试和死信策略补上。
 - 把聊天记忆条目的落库也继续拆向异步批处理。
