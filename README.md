@@ -100,12 +100,22 @@ export NEXA_EMBEDDING_DIMENSIONS=1536
 
 注意：`NEXA_TASK_QUEUE_BACKEND=memory` 仅适合同进程本地开发。独立 worker 进程要消费任务，需要切到 Redis 后端。
 
-前端接口合同见：`docs/frontend-api-contract.md`
-App 对接说明见：`docs/app-api.md`
-后端集成边界见：`docs/backend-integration.md`
-安全审计说明见：`docs/security.md`
-旧项目复用清单见：`docs/reuse-inventory.md`
-第二期底座说明见：`docs/phase2-production-foundation.md`
+## 文档入口
+
+先读总目录：`docs/README.md`
+
+核心说明：
+
+- 项目记忆：`docs/project-memory.md`
+- 代码地图：`docs/codebase-guide.md`
+- 功能清单：`docs/feature-catalog.md`
+- 架构说明：`docs/architecture.md`
+- 前端接口合同：`docs/frontend-api-contract.md`
+- App 对接说明：`docs/app-api.md`
+- 后端集成边界：`docs/backend-integration.md`
+- 安全审计说明：`docs/security.md`
+- 旧项目复用清单：`docs/reuse-inventory.md`
+- 第二期底座说明：`docs/phase2-production-foundation.md`
 
 ## 测试
 
