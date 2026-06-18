@@ -18,6 +18,7 @@ from app.services import (
     cancel_training_run,
     calculate_user_chart,
     create_chat_session,
+    create_embedding_rebuild_job,
     create_issue,
     create_knowledge_source,
     create_app_api_key,
@@ -214,6 +215,14 @@ def health() -> dict:
 @app.get("/api/runtime/status")
 def runtime_status() -> dict:
     return database_runtime_status()
+
+
+@app.post("/api/embeddings/rebuild")
+def embedding_rebuild(payload: dict, session: Session = Depends(get_session)) -> dict:
+    try:
+        return create_embedding_rebuild_job(session, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/auth/login")

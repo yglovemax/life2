@@ -18,6 +18,7 @@
 - 队列任务类型第一版：
   - `training.run`
   - `memory.summarize`
+  - `embedding.rebuild`
 - 失败训练重试接口：
   - `POST /api/training/runs/{run_id}/retry`
 - 训练队列观测接口：
@@ -41,6 +42,7 @@
   - 本地默认使用确定性 mock embedding，便于测试和无密钥开发
   - 支持 `NEXA_EMBEDDING_PROVIDER=openai` 调用 OpenAI `POST /embeddings`
   - `/api/knowledge/search` 在关键词分数不足时使用 mock embedding 相似度兜底排序
+  - 支持 `POST /api/embeddings/rebuild` 对知识片段和用户记忆批量重建 embedding
 - 运行时状态检查：
   - `GET /api/runtime/status`
 
@@ -53,7 +55,7 @@
 - `RedisTaskQueue` 和 `RedisRateLimiter` 现在会复用同一个 Redis client，减少同进程重复建连。
 - 当前仓库已经把 worker 入口和任务协议接好了，但跨进程共享队列这一步还差真实 Redis 环境。
 - 当前 pgvector 迁移只在 PostgreSQL 方言下执行；SQLite 本地开发会跳过 vector 列。
-- 当前默认 embedding provider 是 mock，不调用外部模型；设置 `NEXA_EMBEDDING_PROVIDER=openai` 且配置 `NEXA_OPENAI_API_KEY` 后，会调用 OpenAI embedding 接口。pgvector ANN 查询和批量重建任务会在下一步接入。
+- 当前默认 embedding provider 是 mock，不调用外部模型；设置 `NEXA_EMBEDDING_PROVIDER=openai` 且配置 `NEXA_OPENAI_API_KEY` 后，会调用 OpenAI embedding 接口。pgvector ANN 查询会在后续接入。
 
 ## 训练异步化接口
 
@@ -141,6 +143,55 @@ GET /api/training/queue-status
   "queued_run_ids": [12, 13]
 }
 ```
+
+## Embedding 批量重建
+
+```http
+POST /api/embeddings/rebuild
+```
+
+同步重建某份知识源和某个用户记忆：
+
+```json
+{
+  "target": "all",
+  "run_mode": "sync",
+  "source_id": 12,
+  "user_id": 34,
+  "force": true
+}
+```
+
+队列重建某份知识源：
+
+```json
+{
+  "target": "knowledge",
+  "run_mode": "queued",
+  "source_id": 12,
+  "limit": 1000,
+  "force": true
+}
+```
+
+返回重点字段：
+
+```json
+{
+  "status": "queued",
+  "run_mode": "queued",
+  "target": "knowledge",
+  "processed": 0,
+  "knowledge_chunks": 0,
+  "memory_items": 0,
+  "embedding_provider": "openai",
+  "embedding_model": "text-embedding-3-small",
+  "embedding_dimensions": 1536,
+  "task_id": "task_xxx"
+}
+```
+
+worker 会消费 `embedding.rebuild` 任务。生产环境建议使用 Redis 队列，避免 API 进程和 worker 进程之间任务不共享。
 
 ## 数据库 / pgvector 状态
 

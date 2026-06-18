@@ -118,6 +118,63 @@ export NEXA_EMBEDDING_DIMENSIONS=1536
 
 OpenAI provider 会调用官方 `POST /embeddings` 接口，发送 `model`、`input`、`dimensions`。后续接 pgvector ANN 查询时，接口形状不变。
 
+批量重建 embedding：
+
+```http
+POST /api/embeddings/rebuild
+```
+
+用于切换 embedding provider、model 或 dimensions 后重算旧数据。同步模式适合小范围重建，队列模式适合生产批量任务。
+
+请求示例：
+
+```json
+{
+  "target": "all",
+  "run_mode": "sync",
+  "source_id": 12,
+  "user_id": 34,
+  "limit": 1000,
+  "force": true
+}
+```
+
+字段说明：
+
+- `target`: `all`、`knowledge` 或 `memory`。
+- `run_mode`: `sync` 或 `queued`。
+- `source_id`: 可选，只重建某个知识来源下的 chunks。
+- `user_id`: 可选，只重建某个用户的长期记忆。
+- `limit`: 可选，默认 `1000`，最大 `10000`。
+- `force`: 可选，默认 `true`；传 `false` 时只补缺失或配置不一致的 embedding。
+
+返回示例：
+
+```json
+{
+  "status": "completed",
+  "run_mode": "sync",
+  "target": "all",
+  "source_id": 12,
+  "user_id": 34,
+  "limit": 1000,
+  "force": true,
+  "processed": 2,
+  "knowledge_chunks": 1,
+  "memory_items": 1,
+  "embedding_provider": "mock",
+  "embedding_model": "text-embedding-3-small",
+  "embedding_dimensions": 1536,
+  "task_id": ""
+}
+```
+
+队列模式返回 `status=queued` 和 `task_id`，由 worker 消费 `embedding.rebuild` 任务：
+
+```bash
+python -m app.worker once 20
+```
+
 训练资料上传：
 
 ```http

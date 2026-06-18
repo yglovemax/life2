@@ -40,6 +40,7 @@ Phase 2 已开始接入生产化底座：
 - 数据库运行时工厂，可按 `NEXA_DATABASE_URL` 切换
 - PostgreSQL/pgvector 迁移占位和运行状态检查
 - 知识片段和用户记忆的 mock embedding 入库与语义检索兜底
+- OpenAI embedding provider 接线和 embedding 批量重建接口
 - 队列化训练运行
 - 聊天长期记忆摘要异步队列
 - 失败训练重试接口

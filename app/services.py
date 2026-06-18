@@ -801,6 +801,121 @@ def search_knowledge(session: Session, payload: dict) -> list[dict]:
     return [chunk for _, chunk in scored[:limit]]
 
 
+def create_embedding_rebuild_job(session: Session, payload: dict) -> dict:
+    request = normalize_embedding_rebuild_payload(payload)
+    if request["run_mode"] == "queued":
+        task = TaskEnvelope(task_type="embedding.rebuild", payload=request)
+        task_id = get_task_queue().enqueue(task)
+        return embedding_rebuild_result(
+            request,
+            status="queued",
+            task_id=task_id,
+            knowledge_count=0,
+            memory_count=0,
+        )
+    return execute_embedding_rebuild_job(session, request)
+
+
+def execute_embedding_rebuild_job(session: Session, payload: dict) -> dict:
+    request = normalize_embedding_rebuild_payload(payload)
+    knowledge_count = 0
+    memory_count = 0
+
+    if request["target"] in {"all", "knowledge"}:
+        knowledge_query = select(KnowledgeChunk).order_by(KnowledgeChunk.id)
+        if request["source_id"] is not None:
+            knowledge_query = knowledge_query.where(KnowledgeChunk.source_id == request["source_id"])
+        knowledge_chunks = session.scalars(knowledge_query.limit(request["limit"])).all()
+        for chunk in knowledge_chunks:
+            if not should_rebuild_embedding(chunk, force=request["force"]):
+                continue
+            apply_text_embedding(chunk, f"{chunk.title}\n{chunk.content}")
+            knowledge_count += 1
+
+    if request["target"] in {"all", "memory"}:
+        memory_query = select(MemoryItem).order_by(MemoryItem.id)
+        if request["user_id"] is not None:
+            memory_query = memory_query.where(MemoryItem.user_id == request["user_id"])
+        memory_items = session.scalars(memory_query.limit(request["limit"])).all()
+        for item in memory_items:
+            if not should_rebuild_embedding(item, force=request["force"]):
+                continue
+            apply_text_embedding(item, f"{item.memory_type}\n{item.content}")
+            memory_count += 1
+
+    session.commit()
+    return embedding_rebuild_result(
+        request,
+        status="completed",
+        task_id=str(payload.get("task_id") or ""),
+        knowledge_count=knowledge_count,
+        memory_count=memory_count,
+    )
+
+
+def normalize_embedding_rebuild_payload(payload: dict) -> dict:
+    target = str(payload.get("target") or "all").strip().lower()
+    if target not in {"all", "knowledge", "memory"}:
+        raise ValueError("embedding rebuild target must be all, knowledge, or memory")
+    run_mode = "queued" if str(payload.get("run_mode") or "").strip().lower() == "queued" else "sync"
+    return {
+        "target": target,
+        "run_mode": run_mode,
+        "source_id": nullable_int(payload.get("source_id")),
+        "user_id": nullable_int(payload.get("user_id")),
+        "limit": clamp_int(payload.get("limit"), 1, 10000, 1000),
+        "force": payload_bool(payload.get("force"), default=True),
+    }
+
+
+def should_rebuild_embedding(record, force: bool = True) -> bool:
+    if force:
+        return True
+    payload = record.embedding_payload or {}
+    settings = get_settings()
+    return (
+        not payload
+        or record.embedding_model != settings.embedding_model
+        or int(payload.get("dimensions") or 0) != settings.embedding_dimensions
+        or str(payload.get("provider") or "").strip().lower() != settings.embedding_provider.strip().lower()
+    )
+
+
+def payload_bool(value, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def embedding_rebuild_result(
+    request: dict,
+    status: str,
+    task_id: str,
+    knowledge_count: int,
+    memory_count: int,
+) -> dict:
+    settings = get_settings()
+    processed = knowledge_count + memory_count
+    return {
+        "status": status,
+        "run_mode": request["run_mode"],
+        "target": request["target"],
+        "source_id": request["source_id"],
+        "user_id": request["user_id"],
+        "limit": request["limit"],
+        "force": request["force"],
+        "processed": processed,
+        "knowledge_chunks": knowledge_count,
+        "memory_items": memory_count,
+        "embedding_provider": settings.embedding_provider,
+        "embedding_model": settings.embedding_model,
+        "embedding_dimensions": settings.embedding_dimensions,
+        "task_id": task_id,
+    }
+
+
 def retrieve_knowledge_hits(session: Session, tags: list, input_payload: dict, limit: int = 3) -> list[dict]:
     query_terms = knowledge_query_terms(input_payload)
     query = " ".join(str(term) for term in query_terms if term)
