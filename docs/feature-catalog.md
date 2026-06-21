@@ -52,7 +52,8 @@
 | 训练失败重试 | done | `/api/training/runs/{run_id}/retry` | 支持更新 payload 后重试 |
 | 训练取消 | done | `/api/training/runs/{run_id}/cancel` | 队列中任务可取消 |
 | 训练队列状态 | done | `/api/training/queue-status` | 队列、状态计数、排队 run ids |
-| 资料删除/归档 | planned | 未实现 | 需要补删除或归档接口，避免重复资料混乱 |
+| 资料归档/恢复/删除 | done | `/api/knowledge-sources/{source_id}/archive`, `/restore`, `DELETE` | 归档不进检索；硬删除只允许未被训练运行引用的资料 |
+| 重复资料提示 | done | `/api/knowledge-sources` | 创建资料时返回 `duplicate` 元信息 |
 
 ## App 用户、盘面和聊天
 

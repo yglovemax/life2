@@ -542,6 +542,80 @@ def test_knowledge_chunks_store_mock_embeddings_and_semantic_search_fallback():
     assert results[0]["semantic_score"] > 0
 
 
+def test_knowledge_source_archive_hides_chunks_from_search_and_restore_returns_them():
+    response = client.post(
+        "/api/knowledge-sources",
+        json={
+            "title": "归档测试知识",
+            "source_type": "markdown",
+            "content": "# 归档词\n归档词用于确认归档后不会继续进入检索。",
+            "tags": ["归档测试"],
+        },
+    )
+    assert response.status_code == 200
+    source = response.json()
+
+    archive_response = client.post(f"/api/knowledge-sources/{source['id']}/archive", json={})
+    assert archive_response.status_code == 200
+    assert archive_response.json()["status"] == "archived"
+
+    hidden = client.post(
+        "/api/knowledge/search",
+        json={"query": "归档词", "tags": ["归档测试"], "limit": 5},
+    )
+    assert hidden.status_code == 200
+    assert all(item["source_id"] != source["id"] for item in hidden.json()["items"])
+
+    restore_response = client.post(f"/api/knowledge-sources/{source['id']}/restore", json={})
+    assert restore_response.status_code == 200
+    assert restore_response.json()["status"] == "active"
+
+    visible = client.post(
+        "/api/knowledge/search",
+        json={"query": "归档词", "tags": ["归档测试"], "limit": 5},
+    )
+    assert visible.status_code == 200
+    assert any(item["source_id"] == source["id"] for item in visible.json()["items"])
+
+
+def test_knowledge_source_delete_removes_unused_source_and_chunks():
+    response = client.post(
+        "/api/knowledge-sources",
+        json={
+            "title": "删除测试知识",
+            "source_type": "markdown",
+            "content": "# 删除词\n删除词用于确认硬删除后 chunk 一起消失。",
+            "tags": ["删除测试"],
+        },
+    )
+    assert response.status_code == 200
+    source = response.json()
+    assert client.get(f"/api/knowledge-chunks?source_id={source['id']}").json()["items"]
+
+    delete_response = client.delete(f"/api/knowledge-sources/{source['id']}")
+    assert delete_response.status_code == 200
+    assert delete_response.json()["deleted"] is True
+    assert client.get(f"/api/knowledge-chunks?source_id={source['id']}").json()["items"] == []
+
+
+def test_duplicate_knowledge_source_creation_reports_existing_source():
+    content = "# 重复资料\n重复资料用于提示后台不要重复训练同一份内容。"
+    first = client.post(
+        "/api/knowledge-sources",
+        json={"title": "重复资料 A", "source_type": "markdown", "content": content, "tags": ["重复测试"]},
+    )
+    second = client.post(
+        "/api/knowledge-sources",
+        json={"title": "重复资料 B", "source_type": "markdown", "content": content, "tags": ["重复测试"]},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    duplicate = second.json()["duplicate"]
+    assert duplicate["is_duplicate"] is True
+    assert duplicate["source_id"] == first.json()["id"]
+
+
 def test_manual_knowledge_entry_can_be_created_and_listed():
     response = client.post(
         "/api/knowledge-entries",

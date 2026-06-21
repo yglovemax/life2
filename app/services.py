@@ -184,6 +184,7 @@ def create_knowledge_source(session: Session, payload: dict) -> dict:
     title = (payload.get("title") or "未命名资料").strip()
     content = payload.get("content") or ""
     tags = normalize_tags(payload.get("tags") or [])
+    duplicate = find_duplicate_knowledge_source(session, content)
     source = KnowledgeSource(
         title=title,
         source_type=payload.get("source_type") or "markdown",
@@ -210,7 +211,35 @@ def create_knowledge_source(session: Session, payload: dict) -> dict:
     source.chunk_count = len(chunks)
     session.commit()
     session.refresh(source)
+    return serialize_source(source, duplicate=duplicate)
+
+
+def update_knowledge_source_status(session: Session, source_id: int, status: str) -> dict | None:
+    if status not in {"active", "archived"}:
+        raise ValueError("资料状态只能是 active 或 archived。")
+    source = session.get(KnowledgeSource, source_id)
+    if source is None:
+        return None
+    source.status = status
+    session.commit()
+    session.refresh(source)
     return serialize_source(source)
+
+
+def delete_knowledge_source(session: Session, source_id: int) -> dict | None:
+    source = session.get(KnowledgeSource, source_id)
+    if source is None:
+        return None
+    referenced_run_id = session.scalar(
+        select(TrainingRun.id)
+        .where((TrainingRun.source_id == source.id) | (TrainingRun.published_source_id == source.id))
+        .limit(1)
+    )
+    if referenced_run_id:
+        raise ValueError("训练资料已被训练运行引用，请先归档，避免破坏版本记录。")
+    session.delete(source)
+    session.commit()
+    return {"deleted": True, "source_id": source_id}
 
 
 def create_manual_knowledge_entry(session: Session, payload: dict) -> dict:
@@ -751,6 +780,37 @@ def list_knowledge_sources(session: Session) -> list[dict]:
     return [serialize_source(source) for source in sources]
 
 
+def knowledge_source_fingerprint(content: str) -> str:
+    clean = "\n".join(line.strip() for line in str(content or "").splitlines() if line.strip())
+    if not clean:
+        return ""
+    return hashlib.sha256(clean.encode("utf-8")).hexdigest()
+
+
+def find_duplicate_knowledge_source(session: Session, content: str, exclude_id: int | None = None) -> KnowledgeSource | None:
+    fingerprint = knowledge_source_fingerprint(content)
+    if not fingerprint:
+        return None
+    sources = session.scalars(select(KnowledgeSource).order_by(KnowledgeSource.created_at.desc(), KnowledgeSource.id.desc())).all()
+    for source in sources:
+        if exclude_id is not None and source.id == exclude_id:
+            continue
+        if knowledge_source_fingerprint(source.content) == fingerprint:
+            return source
+    return None
+
+
+def duplicate_source_meta(source: KnowledgeSource | None) -> dict:
+    if source is None:
+        return {"is_duplicate": False, "source_id": None, "title": "", "status": ""}
+    return {
+        "is_duplicate": True,
+        "source_id": source.id,
+        "title": source.title,
+        "status": source.status,
+    }
+
+
 def knowledge_taxonomy() -> list[dict]:
     return [
         {
@@ -769,7 +829,10 @@ def knowledge_taxonomy() -> list[dict]:
 
 
 def list_knowledge_chunks(session: Session, tag: str | None = None, source_id: int | None = None) -> list[dict]:
-    chunks = session.scalars(select(KnowledgeChunk).order_by(KnowledgeChunk.created_at.desc())).all()
+    statement = select(KnowledgeChunk).options(joinedload(KnowledgeChunk.source)).order_by(KnowledgeChunk.created_at.desc())
+    chunks = session.scalars(statement).all()
+    if source_id is None:
+        chunks = [chunk for chunk in chunks if chunk.source and chunk.source.status == "active"]
     rows = [serialize_chunk(chunk) for chunk in chunks]
     if source_id is not None:
         rows = [row for row in rows if row["source_id"] == source_id]
@@ -793,6 +856,12 @@ def search_knowledge_with_pgvector(session: Session, query_embedding: dict, tags
                     SELECT id, 1 - (embedding <=> CAST(:embedding AS vector)) AS semantic_score
                     FROM knowledge_chunks
                     WHERE embedding IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1
+                        FROM knowledge_sources
+                        WHERE knowledge_sources.id = knowledge_chunks.source_id
+                        AND knowledge_sources.status = 'active'
+                    )
                     ORDER BY embedding <=> CAST(:embedding AS vector)
                     LIMIT :limit
                     """
@@ -809,12 +878,15 @@ def search_knowledge_with_pgvector(session: Session, query_embedding: dict, tags
 
     scores = {int(row["id"]): float(row.get("semantic_score") or 0.0) for row in rows}
     ordered_ids = [int(row["id"]) for row in rows]
-    chunks = session.scalars(select(KnowledgeChunk).where(KnowledgeChunk.id.in_(ordered_ids))).all()
+    chunks = session.scalars(select(KnowledgeChunk).options(joinedload(KnowledgeChunk.source)).where(KnowledgeChunk.id.in_(ordered_ids))).all()
     chunks_by_id = {chunk.id: chunk for chunk in chunks}
     results: list[dict] = []
     for chunk_id in ordered_ids:
         chunk = chunks_by_id.get(chunk_id)
         if chunk is None:
+            continue
+        source = getattr(chunk, "source", None)
+        if source is not None and source.status != "active":
             continue
         chunk_tags = chunk.tags or []
         if tags and not set(tags).intersection(set(chunk_tags)):
@@ -836,9 +908,11 @@ def search_knowledge(session: Session, payload: dict) -> list[dict]:
     if pgvector_results is not None:
         return pgvector_results
 
-    chunks = session.scalars(select(KnowledgeChunk).order_by(KnowledgeChunk.created_at.desc())).all()
+    chunks = session.scalars(select(KnowledgeChunk).options(joinedload(KnowledgeChunk.source)).order_by(KnowledgeChunk.created_at.desc())).all()
     scored: list[tuple[float, dict]] = []
     for chunk in chunks:
+        if not chunk.source or chunk.source.status != "active":
+            continue
         chunk_tags = chunk.tags or []
         if tags and not set(tags).intersection(set(chunk_tags)):
             continue
@@ -1011,7 +1085,7 @@ def knowledge_query_terms(input_payload: dict) -> list[str]:
     ]
 
 
-def serialize_source(source: KnowledgeSource) -> dict:
+def serialize_source(source: KnowledgeSource, duplicate: KnowledgeSource | None = None) -> dict:
     return {
         "id": source.id,
         "title": source.title,
@@ -1019,6 +1093,7 @@ def serialize_source(source: KnowledgeSource) -> dict:
         "status": source.status,
         "tags": source.tags,
         "chunk_count": source.chunk_count,
+        "duplicate": duplicate_source_meta(duplicate),
         "created_at": source.created_at.isoformat(),
     }
 

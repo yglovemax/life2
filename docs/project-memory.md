@@ -27,6 +27,7 @@
 - 模块测试、批量测试、人工评分、问题追踪。
 - 发布、灰度、上线、回滚和版本快照。
 - 知识库手动录入、文件上传、GitHub 导入、轻量检索。
+- 知识资料归档、恢复、未引用资料硬删除和重复资料提示。
 - AI 训练运行：同步、队列、失败重试、取消、发布。
 - App 用户、出生资料、本命盘快照、八字输入快照。
 - 聊天会话、消息记录、同步/流式回复。
@@ -92,6 +93,9 @@ python -m app.worker
 - 聊天回复：`POST /api/app/chat/sessions/{session_id}/reply`
 - 聊天流式：`GET /api/app/chat/sessions/{session_id}/stream`
 - 知识搜索：`POST /api/knowledge/search`
+- 知识资料归档：`POST /api/knowledge-sources/{source_id}/archive`
+- 知识资料恢复：`POST /api/knowledge-sources/{source_id}/restore`
+- 知识资料删除：`DELETE /api/knowledge-sources/{source_id}`
 - 训练运行：`POST /api/training/runs`
 - embedding 重建：`POST /api/embeddings/rebuild`
 
@@ -123,7 +127,7 @@ python -m app.worker
 1. 在服务器上部署真实 Redis，跑 API 进程和 worker 进程分离冒烟验证。
 2. 在服务器上接 Postgres + pgvector，跑真实向量列写入和 ANN 检索冒烟。
 3. 把 `app/services.py` 按领域拆分，降低单文件复杂度。
-4. 完善训练中心的资料删除、归档、版本清理和质检规则。
+4. 完善训练中心的知识版本清理、重复合并和质检规则。
 5. 接真实八字排盘服务，补大运、流年、十神、旺衰等结构。
 6. 给前端团队交付稳定的 `/api/app/*` 合同和示例集合。
 7. 最后再做收费、会员、权限套餐和用量计费。

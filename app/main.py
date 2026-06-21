@@ -29,6 +29,7 @@ from app.services import (
     create_or_update_app_user,
     create_output_policy,
     create_training_run,
+    delete_knowledge_source,
     chat_reply_sse_events,
     generate_chat_reply,
     get_app_user,
@@ -78,6 +79,7 @@ from app.services import (
     update_module,
     update_output_policy,
     update_issue,
+    update_knowledge_source_status,
     upsert_memory_summary,
     upload_knowledge_files,
 )
@@ -523,6 +525,33 @@ def knowledge_sources(session: Session = Depends(get_session)) -> dict:
 @app.post("/api/knowledge-sources")
 def knowledge_source_create(payload: dict, session: Session = Depends(get_session)) -> dict:
     return create_knowledge_source(session, payload)
+
+
+@app.post("/api/knowledge-sources/{source_id}/archive")
+def knowledge_source_archive(source_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
+    source = update_knowledge_source_status(session, source_id, "archived")
+    if source is None:
+        raise HTTPException(status_code=404, detail="knowledge source not found")
+    return source
+
+
+@app.post("/api/knowledge-sources/{source_id}/restore")
+def knowledge_source_restore(source_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
+    source = update_knowledge_source_status(session, source_id, "active")
+    if source is None:
+        raise HTTPException(status_code=404, detail="knowledge source not found")
+    return source
+
+
+@app.delete("/api/knowledge-sources/{source_id}")
+def knowledge_source_delete(source_id: int, session: Session = Depends(get_session)) -> dict:
+    try:
+        result = delete_knowledge_source(session, source_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="knowledge source not found")
+    return result
 
 
 @app.post("/api/knowledge/uploads")

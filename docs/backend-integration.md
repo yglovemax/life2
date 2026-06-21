@@ -92,6 +92,35 @@ GET /api/knowledge-chunks
 POST /api/knowledge/search
 ```
 
+资料生命周期：
+
+```http
+POST /api/knowledge-sources/{source_id}/archive
+POST /api/knowledge-sources/{source_id}/restore
+DELETE /api/knowledge-sources/{source_id}
+```
+
+- `archive`：把资料状态改为 `archived`，历史记录和 chunks 保留，但不会再进入 `/api/knowledge/search` 检索结果。
+- `restore`：把归档资料恢复为 `active`，恢复后重新参与检索。
+- `DELETE`：硬删除未被训练运行引用的资料，并删除其 chunks。若资料已被 `TrainingRun.source_id` 或 `TrainingRun.published_source_id` 引用，接口返回 `400`，应改用归档，避免破坏训练版本记录。
+
+`POST /api/knowledge-sources` 会做轻量重复检测。返回里的 `duplicate` 字段用于后台提示是否已经存在同内容资料：
+
+```json
+{
+  "id": 12,
+  "title": "占星资料 2026-06",
+  "status": "active",
+  "chunk_count": 24,
+  "duplicate": {
+    "is_duplicate": true,
+    "source_id": 8,
+    "title": "占星资料旧版",
+    "status": "active"
+  }
+}
+```
+
 知识片段创建后会自动生成本地 mock embedding 元数据，返回的 chunk 会包含：
 
 ```json
