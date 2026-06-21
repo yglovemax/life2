@@ -29,6 +29,7 @@
 - 知识库手动录入、文件上传、GitHub 导入、轻量检索。
 - 知识资料归档、恢复、未引用资料硬删除和重复资料提示。
 - AI 训练运行：同步、队列、失败重试、取消、发布。
+- 训练草稿发布前质检：阻断高风险词、绝对化承诺、医疗/法律/投资风险和低置信度内容。
 - App 用户、出生资料、本命盘快照、八字输入快照。
 - 聊天会话、消息记录、同步/流式回复。
 - 长期记忆条目、长期记忆摘要、自动记忆抽取、异步摘要任务。
@@ -97,6 +98,7 @@ python -m app.worker
 - 知识资料恢复：`POST /api/knowledge-sources/{source_id}/restore`
 - 知识资料删除：`DELETE /api/knowledge-sources/{source_id}`
 - 训练运行：`POST /api/training/runs`
+- 训练质检报告：`GET /api/training/runs/{run_id}/quality-report`
 - embedding 重建：`POST /api/embeddings/rebuild`
 
 完整接口说明看：

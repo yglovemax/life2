@@ -36,6 +36,7 @@ from app.services import (
     get_chat_session,
     get_module_detail,
     get_training_run,
+    build_training_quality_report,
     get_user_chart,
     knowledge_taxonomy,
     import_github_knowledge_sources,
@@ -614,6 +615,14 @@ def training_run_detail(run_id: int, session: Session = Depends(get_session)) ->
     if run is None:
         raise HTTPException(status_code=404, detail="training run not found")
     return run
+
+
+@app.get("/api/training/runs/{run_id}/quality-report")
+def training_run_quality_report(run_id: int, session: Session = Depends(get_session)) -> dict:
+    report = build_training_quality_report(session, run_id)
+    if report is None:
+        raise HTTPException(status_code=404, detail="training run not found")
+    return report
 
 
 @app.post("/api/training/runs/{run_id}/publish")

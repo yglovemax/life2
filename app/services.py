@@ -72,6 +72,33 @@ PROMPT_KEYS = [
 APP_ACTIVE_STATUSES = {ModuleStatus.gray.value, ModuleStatus.live.value}
 ADMIN_SESSION_DAYS = 7
 PASSWORD_ITERATIONS = 120000
+TRAINING_QUALITY_RULES = [
+    {
+        "code": "absolute_claim",
+        "severity": "blocker",
+        "message": "避免绝对化、宿命论或确定性承诺。",
+        "terms": ["一定会", "必然", "注定", "保证", "百分百", "绝对会", "肯定会"],
+    },
+    {
+        "code": "medical_advice",
+        "severity": "blocker",
+        "message": "避免医疗、诊断、治疗或用药建议。",
+        "terms": ["治疗", "治愈", "诊断", "用药", "处方"],
+    },
+    {
+        "code": "legal_advice",
+        "severity": "blocker",
+        "message": "避免法律结论或诉讼承诺。",
+        "terms": ["法律建议", "必赢官司", "诉讼必赢"],
+    },
+    {
+        "code": "investment_advice",
+        "severity": "blocker",
+        "message": "避免投资收益、买卖建议或稳赚承诺。",
+        "terms": ["投资收益", "稳赚", "买入", "卖出", "暴富"],
+    },
+]
+QUALITY_NEGATION_PREFIXES = ["不要", "避免", "不能", "不可", "不应", "不是", "不做", "不替代"]
 
 DEMO_TEST_USERS = [
     {
@@ -687,6 +714,111 @@ def get_training_run_model(session: Session, run_id: int) -> TrainingRun | None:
     )
 
 
+def build_training_quality_report(session: Session, run_id: int, override: bool = False) -> dict | None:
+    run = get_training_run_model(session, run_id)
+    if run is None:
+        return None
+    draft_chunks = [chunk for chunk in sorted(run.draft_chunks, key=lambda item: item.chunk_index) if chunk.status == "draft"]
+    return build_training_quality_report_for_chunks(run, draft_chunks, override=override)
+
+
+def build_training_quality_report_for_chunks(run: TrainingRun, draft_chunks: list[TrainingDraftChunk], override: bool = False) -> dict:
+    issues: list[dict] = []
+    total_chars = 0
+    confidences: list[float] = []
+
+    if not draft_chunks:
+        issues.append(
+            {
+                "code": "no_draft_chunks",
+                "severity": "blocker",
+                "message": "没有可发布的训练草稿。",
+                "chunk_id": None,
+                "chunk_title": "",
+                "matches": [],
+            }
+        )
+
+    for chunk in draft_chunks:
+        text = f"{chunk.title}\n{chunk.content}".strip()
+        total_chars += len(text)
+        confidence = max(0.0, min((chunk.confidence_x100 or 0) / 100, 1.0))
+        confidences.append(confidence)
+        if len(chunk.content.strip()) < 30:
+            issues.append(training_quality_issue("short_content", "warning", "知识片段正文偏短，建议补充适用场景和边界。", chunk, []))
+        if confidence < 0.5:
+            issues.append(training_quality_issue("low_confidence", "blocker", "模型抽取置信度过低，不建议直接发布。", chunk, [f"{confidence:.2f}"]))
+        elif confidence < 0.7:
+            issues.append(training_quality_issue("low_confidence", "warning", "模型抽取置信度偏低，建议人工复核。", chunk, [f"{confidence:.2f}"]))
+
+        for rule in TRAINING_QUALITY_RULES:
+            matches = find_quality_terms(text, rule["terms"])
+            if matches:
+                issues.append(training_quality_issue(rule["code"], rule["severity"], rule["message"], chunk, matches))
+
+    blocker_count = sum(1 for issue in issues if issue["severity"] == "blocker")
+    warning_count = sum(1 for issue in issues if issue["severity"] == "warning")
+    status = "blocked" if blocker_count else "warning" if warning_count else "passed"
+    can_publish = blocker_count == 0 or override
+    return {
+        "run_id": run.id,
+        "run_status": run.status,
+        "status": status,
+        "can_publish": can_publish,
+        "override": bool(override),
+        "metrics": {
+            "draft_count": len(draft_chunks),
+            "total_chars": total_chars,
+            "average_confidence": round(sum(confidences) / len(confidences), 4) if confidences else 0,
+            "min_confidence": round(min(confidences), 4) if confidences else 0,
+            "blocker_count": blocker_count,
+            "warning_count": warning_count,
+        },
+        "issues": issues,
+    }
+
+
+def training_quality_issue(code: str, severity: str, message: str, chunk: TrainingDraftChunk, matches: list[str]) -> dict:
+    return {
+        "code": code,
+        "severity": severity,
+        "message": message,
+        "chunk_id": chunk.id,
+        "chunk_title": chunk.title,
+        "matches": matches,
+    }
+
+
+def find_quality_terms(text: str, terms: list[str]) -> list[str]:
+    matches: list[str] = []
+    for term in terms:
+        start = 0
+        while True:
+            index = text.find(term, start)
+            if index < 0:
+                break
+            if not quality_term_is_negated(text, index):
+                matches.append(term)
+                break
+            start = index + len(term)
+    return matches
+
+
+def quality_term_is_negated(text: str, index: int) -> bool:
+    prefix = text[max(0, index - 4) : index]
+    return any(marker in prefix for marker in QUALITY_NEGATION_PREFIXES)
+
+
+def training_quality_failure_message(report: dict) -> str:
+    blockers = [issue for issue in report.get("issues", []) if issue.get("severity") == "blocker"]
+    codes = []
+    for issue in blockers:
+        code = issue.get("code") or "unknown"
+        if code not in codes:
+            codes.append(code)
+    return "、".join(codes[:4]) or "存在阻断问题"
+
+
 def publish_training_run(session: Session, run_id: int, payload: dict) -> dict | None:
     run = get_training_run_model(session, run_id)
     if run is None:
@@ -694,6 +826,10 @@ def publish_training_run(session: Session, run_id: int, payload: dict) -> dict |
     draft_chunks = [chunk for chunk in sorted(run.draft_chunks, key=lambda item: item.chunk_index) if chunk.status == "draft"]
     if not draft_chunks:
         raise ValueError("没有可发布的训练草稿。")
+    override_quality_gate = bool(payload.get("override_quality_gate"))
+    quality_report = build_training_quality_report_for_chunks(run, draft_chunks, override=override_quality_gate)
+    if not quality_report["can_publish"]:
+        raise ValueError(f"训练质检未通过：{training_quality_failure_message(quality_report)}")
 
     tags = merge_tags(
         normalize_tags(payload.get("tags") or []),
@@ -733,6 +869,7 @@ def publish_training_run(session: Session, run_id: int, payload: dict) -> dict |
     run = get_training_run_model(session, run.id)
     result = serialize_training_run(run)
     result["published_source"] = serialize_source(source)
+    result["quality_report"] = quality_report
     return result
 
 

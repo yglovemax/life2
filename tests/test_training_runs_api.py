@@ -102,6 +102,81 @@ def test_training_run_publish_creates_searchable_knowledge_source():
     assert any("月亮" in item["title"] for item in search_response.json()["items"])
 
 
+def test_training_quality_report_flags_blocking_risks_before_publish():
+    source = create_source()
+    response = client.post(
+        "/api/training/runs",
+        json={
+            "source_id": source["id"],
+            "simulate_model_response": [
+                {
+                    "title": "高风险承诺规则",
+                    "body": "客户一定会获得投资收益，也可以用这个方法治疗焦虑。",
+                    "domain": "astrology",
+                    "tags": ["风险样本"],
+                    "rule_type": "unsafe_rule",
+                    "use_when": "客户询问投资和健康时",
+                    "avoid_when": "无",
+                    "examples": [],
+                    "confidence": 0.93,
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    run = response.json()
+
+    report_response = client.get(f"/api/training/runs/{run['id']}/quality-report")
+
+    assert report_response.status_code == 200
+    report = report_response.json()
+    assert report["run_id"] == run["id"]
+    assert report["status"] == "blocked"
+    assert report["can_publish"] is False
+    issue_codes = {issue["code"] for issue in report["issues"]}
+    assert {"absolute_claim", "investment_advice", "medical_advice"}.issubset(issue_codes)
+    assert report["metrics"]["blocker_count"] >= 3
+
+
+def test_training_publish_blocks_quality_failures_until_overridden():
+    source = create_source()
+    response = client.post(
+        "/api/training/runs",
+        json={
+            "source_id": source["id"],
+            "simulate_model_response": [
+                {
+                    "title": "阻断发布规则",
+                    "body": "这条内容保证客户稳赚，并且一定会改变命运。",
+                    "domain": "astrology",
+                    "tags": ["风险样本"],
+                    "rule_type": "unsafe_rule",
+                    "use_when": "客户问财运时",
+                    "avoid_when": "无",
+                    "examples": [],
+                    "confidence": 0.9,
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    run = response.json()
+
+    blocked = client.post(f"/api/training/runs/{run['id']}/publish", json={"title": "风险发布"})
+    assert blocked.status_code == 400
+    assert "训练质检未通过" in blocked.json()["detail"]
+
+    override = client.post(
+        f"/api/training/runs/{run['id']}/publish",
+        json={"title": "风险发布", "override_quality_gate": True, "operator": "qa"},
+    )
+    assert override.status_code == 200
+    published = override.json()
+    assert published["status"] == "published"
+    assert published["quality_report"]["status"] == "blocked"
+    assert published["quality_report"]["override"] is True
+
+
 def test_training_run_records_failed_invalid_json():
     source = create_source()
     response = client.post(

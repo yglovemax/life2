@@ -301,6 +301,7 @@ POST /api/training/runs
 ```http
 GET /api/training/runs
 GET /api/training/runs/{run_id}
+GET /api/training/runs/{run_id}/quality-report
 ```
 
 发布训练草稿：
@@ -318,7 +319,44 @@ POST /api/training/runs/{run_id}/publish
 }
 ```
 
-发布后会创建 `source_type=ai_training` 的正式知识源，并进入 `/api/knowledge/search` 检索环境。
+发布前建议先读取 `quality-report`。质检报告会检查草稿 chunks 的高风险词、绝对化承诺、医疗/法律/投资风险、低置信度和过短正文：
+
+```json
+{
+  "run_id": 12,
+  "status": "blocked",
+  "can_publish": false,
+  "override": false,
+  "metrics": {
+    "draft_count": 1,
+    "blocker_count": 2,
+    "warning_count": 0,
+    "average_confidence": 0.93
+  },
+  "issues": [
+    {
+      "code": "absolute_claim",
+      "severity": "blocker",
+      "message": "避免绝对化、宿命论或确定性承诺。",
+      "chunk_id": 34,
+      "chunk_title": "高风险承诺规则",
+      "matches": ["一定会"]
+    }
+  ]
+}
+```
+
+`status=blocked` 时，普通发布会返回 `400`，`detail` 以 `训练质检未通过：...` 开头。管理员确认后仍要强制发布，可以在发布 payload 中传：
+
+```json
+{
+  "title": "AI 训练发布：月亮规则",
+  "override_quality_gate": true,
+  "operator": "qa"
+}
+```
+
+发布后会创建 `source_type=ai_training` 的正式知识源，并进入 `/api/knowledge/search` 检索环境。发布响应会带回本次 `quality_report`，方便后台审计展示。
 
 知识库推荐标签体系：
 
