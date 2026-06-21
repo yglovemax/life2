@@ -616,6 +616,86 @@ def test_duplicate_knowledge_source_creation_reports_existing_source():
     assert duplicate["source_id"] == first.json()["id"]
 
 
+def test_knowledge_duplicate_groups_report_matching_sources():
+    unique = uuid4().hex
+    content = f"# 重复组 {unique}\n同一份训练资料重复上传时应被归为一组。"
+    first = client.post(
+        "/api/knowledge-sources",
+        json={"title": f"重复组 A {unique}", "source_type": "markdown", "content": content, "tags": ["重复治理"]},
+    )
+    second = client.post(
+        "/api/knowledge-sources",
+        json={"title": f"重复组 B {unique}", "source_type": "markdown", "content": content, "tags": ["重复治理"]},
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    response = client.get("/api/knowledge/duplicates")
+
+    assert response.status_code == 200
+    groups = response.json()["items"]
+    group = next(item for item in groups if {first.json()["id"], second.json()["id"]}.issubset({source["id"] for source in item["sources"]}))
+    assert group["source_count"] >= 2
+    assert group["active_count"] >= 2
+    assert group["canonical_source"]["id"] == first.json()["id"]
+
+
+def test_duplicate_knowledge_source_can_merge_into_canonical_source():
+    unique = uuid4().hex
+    content = f"# 合并词 {unique}\n合并词用于确认重复资料合并后只保留主源参与检索。"
+    canonical = client.post(
+        "/api/knowledge-sources",
+        json={"title": f"主源 {unique}", "source_type": "markdown", "content": content, "tags": ["合并治理"]},
+    ).json()
+    duplicate = client.post(
+        "/api/knowledge-sources",
+        json={"title": f"重复源 {unique}", "source_type": "markdown", "content": content, "tags": ["合并治理"]},
+    ).json()
+
+    merge_response = client.post(
+        f"/api/knowledge-sources/{duplicate['id']}/merge",
+        json={"target_source_id": canonical["id"], "operator": "qa"},
+    )
+
+    assert merge_response.status_code == 200
+    merged = merge_response.json()
+    assert merged["merged"] is True
+    assert merged["source"]["status"] == "archived"
+    assert merged["target"]["id"] == canonical["id"]
+
+    search_response = client.post(
+        "/api/knowledge/search",
+        json={"query": f"合并词 {unique}", "tags": ["合并治理"], "limit": 5},
+    )
+    source_ids = {item["source_id"] for item in search_response.json()["items"]}
+    assert canonical["id"] in source_ids
+    assert duplicate["id"] not in source_ids
+
+    events = client.get("/api/security/audit-events?event_type=knowledge_source_merged", headers=admin_headers()).json()["items"]
+    assert any(event["target_id"] == str(duplicate["id"]) and event["details"]["target_source_id"] == canonical["id"] for event in events)
+
+
+def test_knowledge_source_merge_rejects_different_content_by_default():
+    unique = uuid4().hex
+    source = client.post(
+        "/api/knowledge-sources",
+        json={"title": f"不同源 A {unique}", "source_type": "markdown", "content": f"# A {unique}\n第一份内容。", "tags": ["合并治理"]},
+    ).json()
+    target = client.post(
+        "/api/knowledge-sources",
+        json={"title": f"不同源 B {unique}", "source_type": "markdown", "content": f"# B {unique}\n第二份内容。", "tags": ["合并治理"]},
+    ).json()
+
+    response = client.post(
+        f"/api/knowledge-sources/{source['id']}/merge",
+        json={"target_source_id": target["id"], "operator": "qa"},
+    )
+
+    assert response.status_code == 400
+    assert "内容完全重复" in response.json()["detail"]
+    assert client.get(f"/api/knowledge-chunks?source_id={source['id']}").json()["items"]
+
+
 def test_manual_knowledge_entry_can_be_created_and_listed():
     response = client.post(
         "/api/knowledge-entries",

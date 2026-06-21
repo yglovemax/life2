@@ -28,6 +28,7 @@
 - 发布、灰度、上线、回滚和版本快照。
 - 知识库手动录入、文件上传、GitHub 导入、轻量检索。
 - 知识资料归档、恢复、未引用资料硬删除和重复资料提示。
+- 重复知识组查询和安全合并归档，合并动作写入审计。
 - AI 训练运行：同步、队列、失败重试、取消、发布。
 - 训练草稿发布前质检：阻断高风险词、绝对化承诺、医疗/法律/投资风险和低置信度内容。
 - 训练质检审计：训练详情返回 `quality_events`，全局审计记录通过、阻断和 override。
@@ -98,6 +99,8 @@ python -m app.worker
 - 知识资料归档：`POST /api/knowledge-sources/{source_id}/archive`
 - 知识资料恢复：`POST /api/knowledge-sources/{source_id}/restore`
 - 知识资料删除：`DELETE /api/knowledge-sources/{source_id}`
+- 重复知识组：`GET /api/knowledge/duplicates`
+- 重复知识合并：`POST /api/knowledge-sources/{source_id}/merge`
 - 训练运行：`POST /api/training/runs`
 - 训练质检报告：`GET /api/training/runs/{run_id}/quality-report`
 - 训练质检审计：`GET /api/training/runs/{run_id}` 返回 `quality_events`

@@ -56,6 +56,7 @@
 | 训练队列状态 | done | `/api/training/queue-status` | 队列、状态计数、排队 run ids |
 | 资料归档/恢复/删除 | done | `/api/knowledge-sources/{source_id}/archive`, `/restore`, `DELETE` | 归档不进检索；硬删除只允许未被训练运行引用的资料 |
 | 重复资料提示 | done | `/api/knowledge-sources` | 创建资料时返回 `duplicate` 元信息 |
+| 重复资料合并 | done | `/api/knowledge/duplicates`, `/api/knowledge-sources/{source_id}/merge` | 查重复组；合并后重复源归档并写审计 |
 
 ## App 用户、盘面和聊天
 

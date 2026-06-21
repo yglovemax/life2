@@ -89,6 +89,7 @@ POST /api/knowledge-sources
 POST /api/knowledge-entries
 GET /api/knowledge-sources
 GET /api/knowledge-chunks
+GET /api/knowledge/duplicates
 POST /api/knowledge/search
 ```
 
@@ -98,11 +99,13 @@ POST /api/knowledge/search
 POST /api/knowledge-sources/{source_id}/archive
 POST /api/knowledge-sources/{source_id}/restore
 DELETE /api/knowledge-sources/{source_id}
+POST /api/knowledge-sources/{source_id}/merge
 ```
 
 - `archive`：把资料状态改为 `archived`，历史记录和 chunks 保留，但不会再进入 `/api/knowledge/search` 检索结果。
 - `restore`：把归档资料恢复为 `active`，恢复后重新参与检索。
 - `DELETE`：硬删除未被训练运行引用的资料，并删除其 chunks。若资料已被 `TrainingRun.source_id` 或 `TrainingRun.published_source_id` 引用，接口返回 `400`，应改用归档，避免破坏训练版本记录。
+- `merge`：把重复资料合并到目标资料，默认只允许内容指纹完全一致。被合并的资料会改为 `archived`，主资料保留并继续参与检索，动作写入 `knowledge_source_merged` 审计事件。
 
 `POST /api/knowledge-sources` 会做轻量重复检测。返回里的 `duplicate` 字段用于后台提示是否已经存在同内容资料：
 
@@ -120,6 +123,42 @@ DELETE /api/knowledge-sources/{source_id}
   }
 }
 ```
+
+重复组查询：
+
+```http
+GET /api/knowledge/duplicates
+```
+
+返回示例：
+
+```json
+{
+  "items": [
+    {
+      "fingerprint": "f3d...",
+      "source_count": 2,
+      "active_count": 2,
+      "canonical_source": {"id": 8, "title": "占星资料旧版"},
+      "sources": [
+        {"id": 8, "title": "占星资料旧版", "status": "active"},
+        {"id": 12, "title": "占星资料重复上传", "status": "active"}
+      ]
+    }
+  ]
+}
+```
+
+合并重复源：
+
+```json
+{
+  "target_source_id": 8,
+  "operator": "qa"
+}
+```
+
+如果两份内容不一致，默认返回 `400`，避免误合并。确有人工确认的特殊情况，可传 `force=true`。
 
 知识片段创建后会自动生成本地 mock embedding 元数据，返回的 chunk 会包含：
 

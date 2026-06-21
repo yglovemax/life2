@@ -269,6 +269,55 @@ def delete_knowledge_source(session: Session, source_id: int) -> dict | None:
     return {"deleted": True, "source_id": source_id}
 
 
+def merge_knowledge_source(session: Session, source_id: int, payload: dict) -> dict | None:
+    source = session.get(KnowledgeSource, source_id)
+    if source is None:
+        return None
+    target_id = nullable_int(payload.get("target_source_id"))
+    if target_id is None:
+        raise ValueError("请提供 target_source_id。")
+    if target_id == source.id:
+        raise ValueError("不能把资料合并到自己。")
+    target = session.get(KnowledgeSource, target_id)
+    if target is None:
+        raise ValueError("目标资料不存在。")
+
+    source_fingerprint = knowledge_source_fingerprint(source.content)
+    target_fingerprint = knowledge_source_fingerprint(target.content)
+    if not payload.get("force") and (not source_fingerprint or source_fingerprint != target_fingerprint):
+        raise ValueError("只有内容完全重复的资料可以直接合并。")
+
+    target.tags = merge_tags(target.tags or [], source.tags or [])
+    source.status = "archived"
+    session.commit()
+    session.refresh(source)
+    session.refresh(target)
+
+    operator = str(payload.get("operator") or "admin").strip() or "admin"
+    audit = record_audit_event(
+        session,
+        event_type="knowledge_source_merged",
+        actor=operator,
+        target_type="knowledge_source",
+        target_id=str(source.id),
+        severity="info",
+        status="archived",
+        details={
+            "source_id": source.id,
+            "target_source_id": target.id,
+            "fingerprint": source_fingerprint,
+            "source_title": source.title,
+            "target_title": target.title,
+        },
+    )
+    return {
+        "merged": True,
+        "source": serialize_source(source),
+        "target": serialize_source(target),
+        "audit_event": audit,
+    }
+
+
 def create_manual_knowledge_entry(session: Session, payload: dict) -> dict:
     source_payload = {
         "title": payload.get("title") or "人工知识条目",
@@ -962,6 +1011,34 @@ def serialize_training_draft_chunk(chunk: TrainingDraftChunk) -> dict:
 def list_knowledge_sources(session: Session) -> list[dict]:
     sources = session.scalars(select(KnowledgeSource).order_by(KnowledgeSource.created_at.desc())).all()
     return [serialize_source(source) for source in sources]
+
+
+def list_knowledge_duplicate_groups(session: Session) -> list[dict]:
+    sources = session.scalars(select(KnowledgeSource).order_by(KnowledgeSource.created_at.asc(), KnowledgeSource.id.asc())).all()
+    groups: dict[str, list[KnowledgeSource]] = {}
+    for source in sources:
+        fingerprint = knowledge_source_fingerprint(source.content)
+        if not fingerprint:
+            continue
+        groups.setdefault(fingerprint, []).append(source)
+
+    rows: list[dict] = []
+    for fingerprint, group_sources in groups.items():
+        if len(group_sources) < 2:
+            continue
+        active_sources = [source for source in group_sources if source.status == "active"]
+        canonical = active_sources[0] if active_sources else group_sources[0]
+        rows.append(
+            {
+                "fingerprint": fingerprint,
+                "source_count": len(group_sources),
+                "active_count": len(active_sources),
+                "canonical_source": serialize_source(canonical),
+                "sources": [serialize_source(source) for source in group_sources],
+            }
+        )
+    rows.sort(key=lambda item: (item["active_count"], item["source_count"]), reverse=True)
+    return rows
 
 
 def knowledge_source_fingerprint(content: str) -> str:

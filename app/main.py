@@ -45,6 +45,7 @@ from app.services import (
     list_fallback_alerts,
     list_issues,
     list_knowledge_chunks,
+    list_knowledge_duplicate_groups,
     list_knowledge_sources,
     list_call_traces,
     list_models,
@@ -56,6 +57,7 @@ from app.services import (
     list_test_users,
     list_training_runs,
     login_admin,
+    merge_knowledge_source,
     metrics,
     publish_module,
     publish_training_run,
@@ -523,6 +525,11 @@ def knowledge_sources(session: Session = Depends(get_session)) -> dict:
     return {"items": list_knowledge_sources(session)}
 
 
+@app.get("/api/knowledge/duplicates")
+def knowledge_duplicates(session: Session = Depends(get_session)) -> dict:
+    return {"items": list_knowledge_duplicate_groups(session)}
+
+
 @app.post("/api/knowledge-sources")
 def knowledge_source_create(payload: dict, session: Session = Depends(get_session)) -> dict:
     return create_knowledge_source(session, payload)
@@ -542,6 +549,17 @@ def knowledge_source_restore(source_id: int, payload: dict, session: Session = D
     if source is None:
         raise HTTPException(status_code=404, detail="knowledge source not found")
     return source
+
+
+@app.post("/api/knowledge-sources/{source_id}/merge")
+def knowledge_source_merge(source_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
+    try:
+        result = merge_knowledge_source(session, source_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="knowledge source not found")
+    return result
 
 
 @app.delete("/api/knowledge-sources/{source_id}")
