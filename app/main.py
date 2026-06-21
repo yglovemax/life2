@@ -30,6 +30,7 @@ from app.services import (
     create_output_policy,
     create_training_run,
     delete_knowledge_source,
+    execute_knowledge_cleanup_recommendations,
     chat_reply_sse_events,
     generate_chat_reply,
     get_app_user,
@@ -534,6 +535,11 @@ def knowledge_duplicates(session: Session = Depends(get_session)) -> dict:
 @app.get("/api/knowledge/cleanup-recommendations")
 def knowledge_cleanup_recommendations(session: Session = Depends(get_session)) -> dict:
     return list_knowledge_cleanup_recommendations(session)
+
+
+@app.post("/api/knowledge/cleanup-recommendations/execute")
+def knowledge_cleanup_recommendations_execute(payload: dict, session: Session = Depends(get_session)) -> dict:
+    return execute_knowledge_cleanup_recommendations(session, payload)
 
 
 @app.post("/api/knowledge-sources")

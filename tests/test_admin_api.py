@@ -782,6 +782,77 @@ def test_cleanup_recommendations_do_not_delete_archived_referenced_source():
     )
 
 
+def test_cleanup_recommendations_execute_selected_safe_actions_and_audit():
+    unique = uuid4().hex
+    content = f"# 执行清理 {unique}\n重复内容用于执行清理建议。"
+    canonical = client.post(
+        "/api/knowledge-sources",
+        json={"title": f"执行主源 {unique}", "source_type": "markdown", "content": content, "tags": ["清理执行"]},
+    ).json()
+    duplicate = client.post(
+        "/api/knowledge-sources",
+        json={"title": f"执行重复源 {unique}", "source_type": "markdown", "content": content, "tags": ["清理执行"]},
+    ).json()
+    archived = client.post(
+        "/api/knowledge-sources",
+        json={
+            "title": f"执行归档源 {unique}",
+            "source_type": "markdown",
+            "content": f"# 执行归档 {unique}\n这份资料应被删除。",
+            "tags": ["清理执行"],
+        },
+    ).json()
+    client.post(f"/api/knowledge-sources/{archived['id']}/archive", json={})
+    recommendations = client.get("/api/knowledge/cleanup-recommendations").json()["items"]
+    recommendation_ids = [
+        item["id"]
+        for item in recommendations
+        if (item["action"] == "merge_duplicate_source" and item["source_id"] == duplicate["id"] and item["target_source_id"] == canonical["id"])
+        or (item["action"] == "delete_archived_unused_source" and item["source_id"] == archived["id"])
+    ]
+    assert len(recommendation_ids) == 2
+
+    response = client.post(
+        "/api/knowledge/cleanup-recommendations/execute",
+        json={"recommendation_ids": recommendation_ids, "operator": "qa"},
+    )
+
+    assert response.status_code == 200
+    result = response.json()
+    assert result["summary"]["requested"] == 2
+    assert result["summary"]["completed"] == 2
+    assert result["summary"]["failed"] == 0
+    assert {item["action"] for item in result["items"]} == {"merge_duplicate_source", "delete_archived_unused_source"}
+
+    duplicate_chunks = client.get(f"/api/knowledge-chunks?source_id={duplicate['id']}").json()["items"]
+    assert duplicate_chunks
+    hidden = client.post(
+        "/api/knowledge/search",
+        json={"query": f"执行清理 {unique}", "tags": ["清理执行"], "limit": 5},
+    ).json()["items"]
+    assert canonical["id"] in {item["source_id"] for item in hidden}
+    assert duplicate["id"] not in {item["source_id"] for item in hidden}
+    assert client.get(f"/api/knowledge-chunks?source_id={archived['id']}").json()["items"] == []
+
+    events = client.get("/api/security/audit-events?event_type=knowledge_cleanup_executed", headers=admin_headers()).json()["items"]
+    assert any(event["actor"] == "qa" and event["details"]["summary"]["completed"] == 2 for event in events)
+
+
+def test_cleanup_execute_rejects_stale_or_unknown_recommendation_ids():
+    response = client.post(
+        "/api/knowledge/cleanup-recommendations/execute",
+        json={"recommendation_ids": ["delete_archived_unused_source:999999"], "operator": "qa"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summary"]["requested"] == 1
+    assert data["summary"]["completed"] == 0
+    assert data["summary"]["failed"] == 1
+    assert data["items"][0]["status"] == "failed"
+    assert "不存在或已过期" in data["items"][0]["error"]
+
+
 def test_manual_knowledge_entry_can_be_created_and_listed():
     response = client.post(
         "/api/knowledge-entries",

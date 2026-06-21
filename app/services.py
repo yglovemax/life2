@@ -1115,6 +1115,86 @@ def list_knowledge_cleanup_recommendations(session: Session) -> dict:
     }
 
 
+def execute_knowledge_cleanup_recommendations(session: Session, payload: dict) -> dict:
+    requested_ids = [str(item).strip() for item in payload.get("recommendation_ids") or [] if str(item).strip()]
+    operator = str(payload.get("operator") or "admin").strip() or "admin"
+    recommendations = {item["id"]: item for item in list_knowledge_cleanup_recommendations(session)["items"]}
+    rows: list[dict] = []
+
+    for recommendation_id in requested_ids:
+        recommendation = recommendations.get(recommendation_id)
+        if recommendation is None:
+            rows.append(
+                {
+                    "recommendation_id": recommendation_id,
+                    "action": "",
+                    "source_id": None,
+                    "target_source_id": None,
+                    "status": "failed",
+                    "error": "清理建议不存在或已过期。",
+                    "result": None,
+                }
+            )
+            continue
+
+        try:
+            result = execute_knowledge_cleanup_recommendation(session, recommendation, operator)
+            rows.append(
+                {
+                    "recommendation_id": recommendation_id,
+                    "action": recommendation["action"],
+                    "source_id": recommendation["source_id"],
+                    "target_source_id": recommendation.get("target_source_id"),
+                    "status": "completed",
+                    "error": "",
+                    "result": result,
+                }
+            )
+        except ValueError as exc:
+            rows.append(
+                {
+                    "recommendation_id": recommendation_id,
+                    "action": recommendation["action"],
+                    "source_id": recommendation["source_id"],
+                    "target_source_id": recommendation.get("target_source_id"),
+                    "status": "failed",
+                    "error": str(exc),
+                    "result": None,
+                }
+            )
+
+    summary = {
+        "requested": len(requested_ids),
+        "completed": sum(1 for row in rows if row["status"] == "completed"),
+        "failed": sum(1 for row in rows if row["status"] == "failed"),
+    }
+    audit = record_audit_event(
+        session,
+        event_type="knowledge_cleanup_executed",
+        actor=operator,
+        target_type="knowledge_cleanup",
+        target_id=f"cleanup_{uuid4().hex[:16]}",
+        severity="info" if summary["failed"] == 0 else "warning",
+        status="completed" if summary["failed"] == 0 else "partial",
+        details={"summary": summary, "items": rows},
+    )
+    return {"summary": summary, "items": rows, "audit_event": audit}
+
+
+def execute_knowledge_cleanup_recommendation(session: Session, recommendation: dict, operator: str) -> dict:
+    action = recommendation.get("action")
+    source_id = int(recommendation.get("source_id") or 0)
+    if action == "merge_duplicate_source":
+        return merge_knowledge_source(
+            session,
+            source_id,
+            {"target_source_id": recommendation.get("target_source_id"), "operator": operator},
+        ) or {}
+    if action == "delete_archived_unused_source":
+        return delete_knowledge_source(session, source_id) or {}
+    raise ValueError("不支持的清理动作。")
+
+
 def knowledge_source_fingerprint(content: str) -> str:
     clean = "\n".join(line.strip() for line in str(content or "").splitlines() if line.strip())
     if not clean:

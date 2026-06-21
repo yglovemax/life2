@@ -165,6 +165,7 @@ GET /api/knowledge/duplicates
 
 ```http
 GET /api/knowledge/cleanup-recommendations
+POST /api/knowledge/cleanup-recommendations/execute
 ```
 
 该接口只生成建议，不会执行删除或合并。当前会返回两类建议：
@@ -197,6 +198,42 @@ GET /api/knowledge/cleanup-recommendations
   ]
 }
 ```
+
+执行选中的建议：
+
+```json
+{
+  "recommendation_ids": [
+    "merge_duplicate_source:12:8",
+    "delete_archived_unused_source:15"
+  ],
+  "operator": "qa"
+}
+```
+
+执行接口会先重新读取当前建议清单，只执行仍然有效的建议。过期或伪造的 `recommendation_id` 会返回 failed，不会盲目操作。返回示例：
+
+```json
+{
+  "summary": {
+    "requested": 2,
+    "completed": 2,
+    "failed": 0
+  },
+  "items": [
+    {
+      "recommendation_id": "merge_duplicate_source:12:8",
+      "action": "merge_duplicate_source",
+      "source_id": 12,
+      "target_source_id": 8,
+      "status": "completed",
+      "error": ""
+    }
+  ]
+}
+```
+
+每次批处理会写入 `knowledge_cleanup_executed` 审计事件；单条 merge 仍会写入 `knowledge_source_merged` 审计事件。
 
 知识片段创建后会自动生成本地 mock embedding 元数据，返回的 chunk 会包含：
 
