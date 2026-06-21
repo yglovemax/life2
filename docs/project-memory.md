@@ -35,6 +35,7 @@
 - 数据库运行时切换、Alembic 迁移、pgvector 迁移占位。
 - 对象存储、任务队列、限流运行时工厂。
 - worker 命令入口和任务协议。
+- Redis 队列、限流共享连接和运行状态检查。
 - 八字页面、八字日运模块、八字事实自动注入。
 - 八字算法服务 HTTP 占位和 mock 接线。
 
@@ -49,7 +50,7 @@
 - 模型调用：默认 mock，生产通过 `NEXA_MODEL_CALL_MODE=live` 和 `NEXA_OPENAI_API_KEY` 开启真实模型。
 - 模型供应商 Key：数据库只保存哈希和前缀，不保存可逆明文。
 - App 鉴权：默认 `dev-app-token` 仅本地使用，生产要替换。
-- 队列：本地可用 memory，独立 API/worker 进程必须切 Redis。
+- 队列：本地可用 memory，独立 API/worker 进程必须切 Redis；`/api/runtime/status` 可检查 Redis 连通和队列积压。
 - embedding：默认 mock，生产可切 OpenAI；切换 provider/model/dimensions 后用 `/api/embeddings/rebuild` 重建旧数据。
 - pgvector：迁移已准备，当前检索仍以平台侧 embedding 相似度兜底为主，ANN 查询后续接入。
 
@@ -119,7 +120,7 @@ python -m app.worker
 
 ## 下一步建议
 
-1. 接真实 Redis，跑 API 进程和 worker 进程分离验证。
+1. 在服务器上部署真实 Redis，跑 API 进程和 worker 进程分离冒烟验证。
 2. 接 Postgres + pgvector，做真实向量列写入和 ANN 检索。
 3. 把 `app/services.py` 按领域拆分，降低单文件复杂度。
 4. 完善训练中心的资料删除、归档、版本清理和质检规则。

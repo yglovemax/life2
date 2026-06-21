@@ -309,3 +309,44 @@ def test_redis_queue_and_rate_limiter_share_backend_state(monkeypatch):
     finally:
         get_settings.cache_clear()
         reset_platform_runtime()
+
+
+def test_platform_runtime_status_reports_redis_health_and_redacts_url(monkeypatch):
+    from app.core.settings import get_settings
+    from app.platform.runtime import platform_runtime_status, reset_platform_runtime
+
+    class FakeRedisClient:
+        def __init__(self):
+            self.lists = {"nexa:tasks": ["task-a", "task-b"]}
+
+        def ping(self):
+            return True
+
+        def llen(self, key):
+            return len(self.lists.get(key) or [])
+
+    class FakeRedis:
+        @staticmethod
+        def from_url(url, decode_responses=True):
+            return FakeRedisClient()
+
+    monkeypatch.setitem(__import__("sys").modules, "redis", types.SimpleNamespace(Redis=FakeRedis))
+    monkeypatch.setenv("NEXA_TASK_QUEUE_BACKEND", "redis")
+    monkeypatch.setenv("NEXA_RATE_LIMIT_BACKEND", "redis")
+    monkeypatch.setenv("NEXA_REDIS_URL", "redis://:secret-pass@localhost:6379/4")
+    get_settings.cache_clear()
+    reset_platform_runtime()
+
+    try:
+        status = platform_runtime_status()
+        assert status["queue"]["backend"] == "redis"
+        assert status["queue"]["pending_tasks"] == 2
+        assert status["queue"]["shared_across_processes"] is True
+        assert status["rate_limit"]["backend"] == "redis"
+        assert status["redis"]["configured"] is True
+        assert status["redis"]["connected"] is True
+        assert "secret-pass" not in status["redis"]["safe_url"]
+        assert status["redis"]["safe_url"] == "redis://:***@localhost:6379/4"
+    finally:
+        get_settings.cache_clear()
+        reset_platform_runtime()

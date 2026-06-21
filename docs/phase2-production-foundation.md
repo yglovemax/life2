@@ -45,6 +45,7 @@
   - 支持 `POST /api/embeddings/rebuild` 对知识片段和用户记忆批量重建 embedding
 - 运行时状态检查：
   - `GET /api/runtime/status`
+  - 返回数据库、pgvector、队列、限流和 Redis 连接状态
 
 ## 当前边界
 
@@ -53,7 +54,7 @@
   - `NEXA_TASK_QUEUE_BACKEND=redis`
   - `NEXA_REDIS_URL=...`
 - `RedisTaskQueue` 和 `RedisRateLimiter` 现在会复用同一个 Redis client，减少同进程重复建连。
-- 当前仓库已经把 worker 入口和任务协议接好了，但跨进程共享队列这一步还差真实 Redis 环境。
+- 当前仓库已经把 worker 入口、任务协议、Redis 状态检查接好了；跨进程共享队列需要部署真实 Redis 环境后验证。
 - 当前 pgvector 迁移只在 PostgreSQL 方言下执行；SQLite 本地开发会跳过 vector 列。
 - 当前默认 embedding provider 是 mock，不调用外部模型；设置 `NEXA_EMBEDDING_PROVIDER=openai` 且配置 `NEXA_OPENAI_API_KEY` 后，会调用 OpenAI embedding 接口。pgvector ANN 查询会在后续接入。
 
@@ -218,6 +219,23 @@ GET /api/runtime/status
     "embedding_provider": "openai",
     "target_tables": ["knowledge_chunks", "memory_items"],
     "index_type": "ivfflat_cosine"
+  },
+  "queue": {
+    "backend": "redis",
+    "pending_tasks": 2,
+    "shared_across_processes": true,
+    "error": ""
+  },
+  "rate_limit": {
+    "backend": "redis",
+    "shared_across_processes": true,
+    "error": ""
+  },
+  "redis": {
+    "configured": true,
+    "safe_url": "redis://:***@localhost:6379/0",
+    "connected": true,
+    "error": ""
   }
 }
 ```
@@ -225,6 +243,9 @@ GET /api/runtime/status
 相关环境变量：
 
 - `NEXA_DATABASE_URL`
+- `NEXA_TASK_QUEUE_BACKEND`
+- `NEXA_RATE_LIMIT_BACKEND`
+- `NEXA_REDIS_URL`
 - `NEXA_EMBEDDING_PROVIDER`
 - `NEXA_EMBEDDING_MODEL`
 - `NEXA_EMBEDDING_DIMENSIONS`
@@ -283,10 +304,30 @@ python -m app.worker once 20
 python -m app.worker
 ```
 
+API 进程和 worker 分离时，两边必须使用同一组 Redis 环境变量：
+
+```bash
+export NEXA_TASK_QUEUE_BACKEND=redis
+export NEXA_RATE_LIMIT_BACKEND=redis
+export NEXA_REDIS_URL=redis://127.0.0.1:6379/0
+```
+
+检查 Redis 是否真正连通：
+
+```bash
+curl http://127.0.0.1:8812/api/runtime/status
+```
+
+重点看：
+
+- `redis.connected=true`
+- `queue.backend=redis`
+- `queue.shared_across_processes=true`
+- `queue.pending_tasks`
+
 ## 下一步
 
-- 把 `RedisTaskQueue` 和 `RedisRateLimiter` 接到真实 `NEXA_REDIS_URL`。
+- 在服务器上部署真实 Redis，并跑 API/worker 分进程冒烟测试。
 - 把 mock 相似度搜索升级为 PostgreSQL/pgvector ANN 查询。
-- 增加 embedding 批量重建和版本迁移任务。
 - 把训练失败重试和死信策略补上。
 - 把聊天记忆条目的落库也继续拆向异步批处理。

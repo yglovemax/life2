@@ -100,6 +100,16 @@ export NEXA_EMBEDDING_DIMENSIONS=1536
 
 注意：`NEXA_TASK_QUEUE_BACKEND=memory` 仅适合同进程本地开发。独立 worker 进程要消费任务，需要切到 Redis 后端。
 
+API 进程和 worker 分进程运行时建议：
+
+```bash
+export NEXA_TASK_QUEUE_BACKEND=redis
+export NEXA_RATE_LIMIT_BACKEND=redis
+export NEXA_REDIS_URL=redis://127.0.0.1:6379/0
+```
+
+`GET /api/runtime/status` 会返回 `queue`、`rate_limit` 和 `redis` 状态，用来确认 Redis 是否连通、队列是否跨进程共享。
+
 ## 文档入口
 
 先读总目录：`docs/README.md`

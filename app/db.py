@@ -5,6 +5,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.settings import get_settings
+from app.platform.runtime import platform_runtime_status
 
 
 class Base(DeclarativeBase):
@@ -58,7 +59,7 @@ def database_runtime_status(check_connection: bool = True) -> dict:
         },
     }
     if not check_connection:
-        return status
+        return {**status, **platform_runtime_status(check_connection=False)}
 
     try:
         with get_engine().connect() as connection:
@@ -73,6 +74,7 @@ def database_runtime_status(check_connection: bool = True) -> dict:
     except Exception as exc:  # pragma: no cover - environment-specific diagnostics
         status["database"]["connected"] = False
         status["database"]["error"] = str(exc)[:300]
+    status.update(platform_runtime_status(check_connection=check_connection))
     return status
 
 

@@ -104,11 +104,13 @@
 | 任务队列工厂 | done | `NEXA_TASK_QUEUE_BACKEND` | memory/Redis |
 | 限流工厂 | done | `NEXA_RATE_LIMIT_BACKEND` | memory/Redis |
 | Redis client 复用 | done | `NEXA_REDIS_URL` | 队列和限流复用 |
+| Redis 运行状态检查 | done | `/api/runtime/status` | 展示 Redis 连通、队列后端、积压任务数 |
 | worker | done | `python -m app.worker` | 消费训练、记忆、embedding 任务 |
 | mock embedding | done | 默认 | 无密钥开发和测试 |
 | OpenAI embedding | done | `NEXA_EMBEDDING_PROVIDER=openai` | 调用 `/embeddings`，失败 fallback mock |
 | embedding 批量重建 | done | `/api/embeddings/rebuild` | sync/queued，knowledge/memory/all |
 | pgvector ANN 检索 | planned | 未实现 | 后续替换或增强现有搜索 |
+| 真实 Redis 冒烟 | planned | 服务器环境 | 需要部署 Redis 后验证 API/worker 分进程共享队列 |
 
 ## 安全和审计
 

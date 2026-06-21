@@ -29,6 +29,10 @@ def test_runtime_status_exposes_database_and_pgvector_plan():
     assert data["pgvector"]["extension"] == "vector"
     assert data["pgvector"]["embedding_provider"] in {"mock", "openai"}
     assert data["pgvector"]["target_tables"] == ["knowledge_chunks", "memory_items"]
+    assert data["queue"]["backend"] in {"memory", "redis"}
+    assert "pending_tasks" in data["queue"]
+    assert data["rate_limit"]["backend"] in {"memory", "redis"}
+    assert "configured" in data["redis"]
 
 
 def test_admin_login_returns_session_and_me_endpoint_resolves_user():
