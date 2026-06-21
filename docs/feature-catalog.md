@@ -49,6 +49,7 @@
 | 知识分类 | done | `/api/knowledge/taxonomy` | 占星、八字等维度建议 |
 | AI 训练运行 | done | `/api/training/runs` | 同步或队列生成草稿 chunks |
 | 训练质检报告 | done | `/api/training/runs/{run_id}/quality-report` | 发布前检查阻断项、警告和置信度 |
+| 训练质检审计 | done | `quality_events`, `/api/security/audit-events` | 记录通过、阻断和 override 发布 |
 | 训练发布 | done | `/api/training/runs/{run_id}/publish` | 草稿发布为正式知识源 |
 | 训练失败重试 | done | `/api/training/runs/{run_id}/retry` | 支持更新 payload 后重试 |
 | 训练取消 | done | `/api/training/runs/{run_id}/cancel` | 队列中任务可取消 |

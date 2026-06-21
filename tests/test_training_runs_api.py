@@ -93,6 +93,8 @@ def test_training_run_publish_creates_searchable_knowledge_source():
     assert published["published_source"]["title"] == "AI 训练发布：月亮"
     assert published["published_source"]["source_type"] == "ai_training"
     assert published["published_source"]["chunk_count"] >= 1
+    assert published["quality_report"]["status"] == "passed"
+    assert any(event["event_type"] == "training_quality_passed" for event in published["quality_events"])
 
     search_response = client.post(
         "/api/knowledge/search",
@@ -175,6 +177,16 @@ def test_training_publish_blocks_quality_failures_until_overridden():
     assert published["status"] == "published"
     assert published["quality_report"]["status"] == "blocked"
     assert published["quality_report"]["override"] is True
+
+    detail = client.get(f"/api/training/runs/{run['id']}")
+    assert detail.status_code == 200
+    quality_events = detail.json()["quality_events"]
+    event_types = [event["event_type"] for event in quality_events]
+    assert "training_quality_blocked" in event_types
+    assert "training_quality_override" in event_types
+    override_events = [event for event in quality_events if event["event_type"] == "training_quality_override"]
+    assert override_events[0]["actor"] == "qa"
+    assert override_events[0]["details"]["quality_report"]["status"] == "blocked"
 
 
 def test_training_run_records_failed_invalid_json():

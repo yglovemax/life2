@@ -304,6 +304,12 @@ GET /api/training/runs/{run_id}
 GET /api/training/runs/{run_id}/quality-report
 ```
 
+训练详情会额外返回 `quality_events`，用于展示该训练运行最近的质检审计记录。事件也会进入全局 `/api/security/audit-events`：
+
+- `training_quality_passed`：质检通过并发布。
+- `training_quality_blocked`：发布被质检阻断。
+- `training_quality_override`：管理员带 `override_quality_gate=true` 强制发布。
+
 发布训练草稿：
 
 ```http
@@ -356,7 +362,7 @@ POST /api/training/runs/{run_id}/publish
 }
 ```
 
-发布后会创建 `source_type=ai_training` 的正式知识源，并进入 `/api/knowledge/search` 检索环境。发布响应会带回本次 `quality_report`，方便后台审计展示。
+发布后会创建 `source_type=ai_training` 的正式知识源，并进入 `/api/knowledge/search` 检索环境。发布响应会带回本次 `quality_report` 和 `quality_events`，方便后台审计展示。
 
 知识库推荐标签体系：
 

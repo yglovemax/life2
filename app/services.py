@@ -703,7 +703,11 @@ def training_queue_status(session: Session) -> dict:
 
 def get_training_run(session: Session, run_id: int) -> dict | None:
     run = get_training_run_model(session, run_id)
-    return serialize_training_run(run) if run else None
+    if run is None:
+        return None
+    data = serialize_training_run(run)
+    data["quality_events"] = list_training_quality_events(session, run.id)
+    return data
 
 
 def get_training_run_model(session: Session, run_id: int) -> TrainingRun | None:
@@ -819,6 +823,45 @@ def training_quality_failure_message(report: dict) -> str:
     return "、".join(codes[:4]) or "存在阻断问题"
 
 
+def record_training_quality_event(session: Session, run: TrainingRun, report: dict, event_type: str, payload: dict) -> dict:
+    operator = (payload.get("operator") or "system").strip() if isinstance(payload.get("operator"), str) else "system"
+    severity = "warning" if event_type in {"training_quality_blocked", "training_quality_override"} else "info"
+    status = {
+        "training_quality_blocked": "blocked",
+        "training_quality_override": "override",
+        "training_quality_passed": "ok",
+    }.get(event_type, "ok")
+    return record_audit_event(
+        session,
+        event_type=event_type,
+        actor=operator,
+        target_type="training_run",
+        target_id=str(run.id),
+        severity=severity,
+        status=status,
+        details={
+            "run_id": run.id,
+            "source_id": run.source_id,
+            "published_source_id": run.published_source_id,
+            "quality_report": report,
+        },
+    )
+
+
+def list_training_quality_events(session: Session, run_id: int, limit: int = 20) -> list[dict]:
+    events = session.scalars(
+        select(AuditEvent)
+        .where(
+            AuditEvent.target_type == "training_run",
+            AuditEvent.target_id == str(run_id),
+            AuditEvent.event_type.in_(["training_quality_blocked", "training_quality_override", "training_quality_passed"]),
+        )
+        .order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+        .limit(limit)
+    ).all()
+    return [serialize_audit_event(event) for event in events]
+
+
 def publish_training_run(session: Session, run_id: int, payload: dict) -> dict | None:
     run = get_training_run_model(session, run_id)
     if run is None:
@@ -829,6 +872,7 @@ def publish_training_run(session: Session, run_id: int, payload: dict) -> dict |
     override_quality_gate = bool(payload.get("override_quality_gate"))
     quality_report = build_training_quality_report_for_chunks(run, draft_chunks, override=override_quality_gate)
     if not quality_report["can_publish"]:
+        record_training_quality_event(session, run, quality_report, "training_quality_blocked", payload)
         raise ValueError(f"训练质检未通过：{training_quality_failure_message(quality_report)}")
 
     tags = merge_tags(
@@ -867,9 +911,12 @@ def publish_training_run(session: Session, run_id: int, payload: dict) -> dict |
     run.completed_at = utc_now()
     session.commit()
     run = get_training_run_model(session, run.id)
+    event_type = "training_quality_override" if override_quality_gate and quality_report["status"] == "blocked" else "training_quality_passed"
+    record_training_quality_event(session, run, quality_report, event_type, payload)
     result = serialize_training_run(run)
     result["published_source"] = serialize_source(source)
     result["quality_report"] = quality_report
+    result["quality_events"] = list_training_quality_events(session, run.id)
     return result
 
 
