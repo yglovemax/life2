@@ -39,9 +39,11 @@
 - Embedding 入库第一版：
   - 知识片段创建时写入 `embedding_model`、`embedding_hash`、`embedding_payload`
   - 用户长期记忆创建时写入同样的 embedding 元数据
+  - PostgreSQL 下会把 OpenAI embedding vector 同步写入 `knowledge_chunks.embedding` 和 `memory_items.embedding`
   - 本地默认使用确定性 mock embedding，便于测试和无密钥开发
   - 支持 `NEXA_EMBEDDING_PROVIDER=openai` 调用 OpenAI `POST /embeddings`
   - `/api/knowledge/search` 在关键词分数不足时使用 mock embedding 相似度兜底排序
+  - PostgreSQL 且查询 embedding 带 `vector` 时，`/api/knowledge/search` 会优先使用 pgvector `<=>` cosine 距离排序
   - 支持 `POST /api/embeddings/rebuild` 对知识片段和用户记忆批量重建 embedding
 - 运行时状态检查：
   - `GET /api/runtime/status`
@@ -56,7 +58,7 @@
 - `RedisTaskQueue` 和 `RedisRateLimiter` 现在会复用同一个 Redis client，减少同进程重复建连。
 - 当前仓库已经把 worker 入口、任务协议、Redis 状态检查接好了；跨进程共享队列需要部署真实 Redis 环境后验证。
 - 当前 pgvector 迁移只在 PostgreSQL 方言下执行；SQLite 本地开发会跳过 vector 列。
-- 当前默认 embedding provider 是 mock，不调用外部模型；设置 `NEXA_EMBEDDING_PROVIDER=openai` 且配置 `NEXA_OPENAI_API_KEY` 后，会调用 OpenAI embedding 接口。pgvector ANN 查询会在后续接入。
+- 当前默认 embedding provider 是 mock，不调用外部模型；设置 `NEXA_EMBEDDING_PROVIDER=openai` 且配置 `NEXA_OPENAI_API_KEY` 后，会调用 OpenAI embedding 接口。pgvector ANN 分支已接入，但真实效果需要 PostgreSQL 环境验证。
 
 ## 训练异步化接口
 
@@ -328,6 +330,6 @@ curl http://127.0.0.1:8812/api/runtime/status
 ## 下一步
 
 - 在服务器上部署真实 Redis，并跑 API/worker 分进程冒烟测试。
-- 把 mock 相似度搜索升级为 PostgreSQL/pgvector ANN 查询。
+- 在服务器上部署 PostgreSQL + pgvector，并跑真实 ANN 检索冒烟。
 - 把训练失败重试和死信策略补上。
 - 把聊天记忆条目的落库也继续拆向异步批处理。

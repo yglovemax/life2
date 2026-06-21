@@ -610,7 +610,7 @@ Response：
 }
 ```
 
-`embedding` 当前是后端本地 mock 元数据，用于后续记忆召回和 pgvector 接入；前端展示时可以忽略。
+`embedding` 是后端检索元数据；SQLite 本地可能是 mock，PostgreSQL 生产环境可同步写入 pgvector 列。前端展示时可以忽略。
 
 ## 6. App 页面/模块渲染
 

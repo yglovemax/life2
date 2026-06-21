@@ -107,7 +107,7 @@ POST /api/knowledge/search
 }
 ```
 
-`POST /api/knowledge/search` 当前同时计算关键词/tag 分数和 embedding 相似度；命中结果会返回 `semantic_score`。默认 provider 是 `mock`，生产可设置：
+`POST /api/knowledge/search` 当前会返回 `semantic_score`。SQLite 或 mock embedding 下使用平台侧相似度兜底；PostgreSQL 且查询 embedding 带 `vector` 时，会优先使用 pgvector `<=>` cosine 距离排序。默认 provider 是 `mock`，生产可设置：
 
 ```bash
 export NEXA_EMBEDDING_PROVIDER=openai
@@ -116,7 +116,7 @@ export NEXA_EMBEDDING_MODEL=text-embedding-3-small
 export NEXA_EMBEDDING_DIMENSIONS=1536
 ```
 
-OpenAI provider 会调用官方 `POST /embeddings` 接口，发送 `model`、`input`、`dimensions`。后续接 pgvector ANN 查询时，接口形状不变。
+OpenAI provider 会调用官方 `POST /embeddings` 接口，发送 `model`、`input`、`dimensions`。在 PostgreSQL 环境下，知识片段和用户记忆的 OpenAI vector 会同步写入 pgvector 列；切换 provider/model/dimensions 后，可用 `/api/embeddings/rebuild` 重建旧数据。
 
 批量重建 embedding：
 

@@ -99,7 +99,7 @@
 | --- | --- | --- | --- |
 | Alembic 迁移 | done | `alembic upgrade head` | SQLite 本地、Postgres 生产 |
 | 数据库运行时切换 | done | `NEXA_DATABASE_URL` | 支持切换 URL |
-| Postgres/pgvector 迁移 | partial | migration `20260617_0002` | vector 列和索引迁移已准备 |
+| Postgres/pgvector 迁移 | done | migration `20260617_0002` | vector 列和 ivfflat 索引迁移已准备 |
 | 对象存储工厂 | done | `NEXA_OBJECT_STORAGE_BACKEND` | 当前 local |
 | 任务队列工厂 | done | `NEXA_TASK_QUEUE_BACKEND` | memory/Redis |
 | 限流工厂 | done | `NEXA_RATE_LIMIT_BACKEND` | memory/Redis |
@@ -109,7 +109,7 @@
 | mock embedding | done | 默认 | 无密钥开发和测试 |
 | OpenAI embedding | done | `NEXA_EMBEDDING_PROVIDER=openai` | 调用 `/embeddings`，失败 fallback mock |
 | embedding 批量重建 | done | `/api/embeddings/rebuild` | sync/queued，knowledge/memory/all |
-| pgvector ANN 检索 | planned | 未实现 | 后续替换或增强现有搜索 |
+| pgvector ANN 检索 | partial | PostgreSQL + OpenAI vector | PG 下优先使用 `<=>` 向量排序；真实效果需服务器验证 |
 | 真实 Redis 冒烟 | planned | 服务器环境 | 需要部署 Redis 后验证 API/worker 分进程共享队列 |
 
 ## 安全和审计

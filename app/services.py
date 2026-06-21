@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.core.settings import get_settings
@@ -205,6 +205,8 @@ def create_knowledge_source(session: Session, payload: dict) -> dict:
         )
         apply_text_embedding(chunk_model, f"{chunk_model.title}\n{chunk_model.content}")
         session.add(chunk_model)
+        session.flush()
+        sync_pgvector_embedding(session, "knowledge_chunks", chunk_model.id, chunk_model.embedding_payload)
     source.chunk_count = len(chunks)
     session.commit()
     session.refresh(source)
@@ -681,15 +683,17 @@ def publish_training_run(session: Session, run_id: int, payload: dict) -> dict |
     session.flush()
     chunks = chunk_markdown(source.title, content)
     for index, chunk in enumerate(chunks, start=1):
-        session.add(
-            KnowledgeChunk(
-                source_id=source.id,
-                title=chunk["title"],
-                content=chunk["content"],
-                tags=tags,
-                chunk_index=index,
-            )
+        chunk_model = KnowledgeChunk(
+            source_id=source.id,
+            title=chunk["title"],
+            content=chunk["content"],
+            tags=tags,
+            chunk_index=index,
         )
+        apply_text_embedding(chunk_model, f"{chunk_model.title}\n{chunk_model.content}")
+        session.add(chunk_model)
+        session.flush()
+        sync_pgvector_embedding(session, "knowledge_chunks", chunk_model.id, chunk_model.embedding_payload)
     source.chunk_count = len(chunks)
     for chunk in draft_chunks:
         chunk.status = "published"
@@ -774,12 +778,65 @@ def list_knowledge_chunks(session: Session, tag: str | None = None, source_id: i
     return rows
 
 
+def search_knowledge_with_pgvector(session: Session, query_embedding: dict, tags: list[str], limit: int) -> list[dict] | None:
+    if not is_postgres_session(session):
+        return None
+    literal = embedding_vector_literal(query_embedding)
+    if not literal:
+        return None
+    fetch_limit = max(limit * 5, limit, 10)
+    try:
+        rows = (
+            session.execute(
+                text(
+                    """
+                    SELECT id, 1 - (embedding <=> CAST(:embedding AS vector)) AS semantic_score
+                    FROM knowledge_chunks
+                    WHERE embedding IS NOT NULL
+                    ORDER BY embedding <=> CAST(:embedding AS vector)
+                    LIMIT :limit
+                    """
+                ),
+                {"embedding": literal, "limit": fetch_limit},
+            )
+            .mappings()
+            .all()
+        )
+    except Exception:
+        return None
+    if not rows:
+        return []
+
+    scores = {int(row["id"]): float(row.get("semantic_score") or 0.0) for row in rows}
+    ordered_ids = [int(row["id"]) for row in rows]
+    chunks = session.scalars(select(KnowledgeChunk).where(KnowledgeChunk.id.in_(ordered_ids))).all()
+    chunks_by_id = {chunk.id: chunk for chunk in chunks}
+    results: list[dict] = []
+    for chunk_id in ordered_ids:
+        chunk = chunks_by_id.get(chunk_id)
+        if chunk is None:
+            continue
+        chunk_tags = chunk.tags or []
+        if tags and not set(tags).intersection(set(chunk_tags)):
+            continue
+        row = serialize_chunk(chunk)
+        row["semantic_score"] = round(scores.get(chunk_id, 0.0), 6)
+        results.append(row)
+        if len(results) >= limit:
+            break
+    return results
+
+
 def search_knowledge(session: Session, payload: dict) -> list[dict]:
     query = (payload.get("query") or "").strip().lower()
     tags = normalize_tags(payload.get("tags") or [])
     limit = int(payload.get("limit") or 8)
-    chunks = session.scalars(select(KnowledgeChunk).order_by(KnowledgeChunk.created_at.desc())).all()
     query_embedding = build_text_embedding_payload(query) if query else {}
+    pgvector_results = search_knowledge_with_pgvector(session, query_embedding, tags, limit) if query_embedding else None
+    if pgvector_results is not None:
+        return pgvector_results
+
+    chunks = session.scalars(select(KnowledgeChunk).order_by(KnowledgeChunk.created_at.desc())).all()
     scored: list[tuple[float, dict]] = []
     for chunk in chunks:
         chunk_tags = chunk.tags or []
@@ -830,6 +887,7 @@ def execute_embedding_rebuild_job(session: Session, payload: dict) -> dict:
             if not should_rebuild_embedding(chunk, force=request["force"]):
                 continue
             apply_text_embedding(chunk, f"{chunk.title}\n{chunk.content}")
+            sync_pgvector_embedding(session, "knowledge_chunks", chunk.id, chunk.embedding_payload)
             knowledge_count += 1
 
     if request["target"] in {"all", "memory"}:
@@ -841,6 +899,7 @@ def execute_embedding_rebuild_job(session: Session, payload: dict) -> dict:
             if not should_rebuild_embedding(item, force=request["force"]):
                 continue
             apply_text_embedding(item, f"{item.memory_type}\n{item.content}")
+            sync_pgvector_embedding(session, "memory_items", item.id, item.embedding_payload)
             memory_count += 1
 
     session.commit()
@@ -987,6 +1046,42 @@ def serialize_embedding_meta(record) -> dict:
         "dimensions": int(payload.get("dimensions") or get_settings().embedding_dimensions),
         "provider": payload.get("provider") or ("mock" if payload else ""),
     }
+
+
+PGVECTOR_TABLES = {"knowledge_chunks", "memory_items"}
+
+
+def embedding_vector_literal(payload: dict) -> str:
+    vector = payload.get("vector") if isinstance(payload, dict) else None
+    if not isinstance(vector, list) or not vector:
+        return ""
+    try:
+        values = [format(float(value), ".12g") for value in vector]
+    except (TypeError, ValueError):
+        return ""
+    return "[" + ",".join(values) + "]"
+
+
+def is_postgres_session(session: Session) -> bool:
+    try:
+        return session.get_bind().dialect.name == "postgresql"
+    except Exception:
+        return False
+
+
+def sync_pgvector_embedding(session: Session, table_name: str, record_id: int | None, payload: dict) -> bool:
+    if table_name not in PGVECTOR_TABLES:
+        raise ValueError("unsupported pgvector table")
+    if not record_id or not is_postgres_session(session):
+        return False
+    literal = embedding_vector_literal(payload)
+    if not literal:
+        return False
+    session.execute(
+        text(f"UPDATE {table_name} SET embedding = CAST(:embedding AS vector) WHERE id = :id"),
+        {"embedding": literal, "id": int(record_id)},
+    )
+    return True
 
 
 def apply_text_embedding(record, text: str) -> None:
@@ -2189,6 +2284,8 @@ def create_memory_item(session: Session, user_id: int, payload: dict) -> dict | 
     )
     apply_text_embedding(item, f"{item.memory_type}\n{item.content}")
     session.add(item)
+    session.flush()
+    sync_pgvector_embedding(session, "memory_items", item.id, item.embedding_payload)
     session.commit()
     session.refresh(item)
     return serialize_memory_item(item)

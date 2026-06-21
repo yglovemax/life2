@@ -111,7 +111,7 @@ tests/
 - 队列：本地 memory，生产需要 Redis。
 - 限流：本地 memory，生产可 Redis。
 - embedding：默认 mock，可配置 OpenAI provider。
-- pgvector：迁移已准备，ANN 查询后续接入。
+- pgvector：迁移、向量列写入和 PG 检索分支已准备，真实效果需 PostgreSQL 环境验证。
 
 ## 模型调用模式
 
@@ -133,7 +133,7 @@ NEXA_OPENAI_API_KEY=<openai_api_key>
 ## 后续演进
 
 - 接真实 Redis，完成 API/worker 分进程队列验证。
-- 接 Postgres + pgvector，启用真实向量列和 ANN 检索。
+- 在服务器上接 Postgres + pgvector，验证真实向量列写入和 ANN 检索。
 - 拆分 `app/services.py`，按领域形成更清晰的服务边界。
 - 接真实八字排盘服务，补大运、流年、旺衰等结构。
 - 增加更完整的发布审批、问题评论和操作历史。

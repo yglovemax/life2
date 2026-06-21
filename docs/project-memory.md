@@ -32,7 +32,7 @@
 - 聊天会话、消息记录、同步/流式回复。
 - 长期记忆条目、长期记忆摘要、自动记忆抽取、异步摘要任务。
 - mock embedding、OpenAI embedding provider、embedding 批量重建。
-- 数据库运行时切换、Alembic 迁移、pgvector 迁移占位。
+- 数据库运行时切换、Alembic 迁移、pgvector 向量列写入和 PG 检索分支。
 - 对象存储、任务队列、限流运行时工厂。
 - worker 命令入口和任务协议。
 - Redis 队列、限流共享连接和运行状态检查。
@@ -52,7 +52,7 @@
 - App 鉴权：默认 `dev-app-token` 仅本地使用，生产要替换。
 - 队列：本地可用 memory，独立 API/worker 进程必须切 Redis；`/api/runtime/status` 可检查 Redis 连通和队列积压。
 - embedding：默认 mock，生产可切 OpenAI；切换 provider/model/dimensions 后用 `/api/embeddings/rebuild` 重建旧数据。
-- pgvector：迁移已准备，当前检索仍以平台侧 embedding 相似度兜底为主，ANN 查询后续接入。
+- pgvector：迁移、向量列写入和 PG 检索分支已接；SQLite 本地仍以平台侧 embedding 相似度兜底。
 
 ## 当前运行方式
 
@@ -112,7 +112,7 @@ python -m app.worker
 - 当前不做大模型权重微调。
 - 当前不保存模型供应商 Key 明文。
 - 当前八字排盘引擎不是完整上线版，已有的是输入快照、mock 计算、外部 HTTP 服务占位。
-- 当前 pgvector 列和索引迁移已准备，但 ANN 检索还未替换现有搜索实现。
+- 当前 pgvector 列、索引、向量写入和 PG 检索分支已准备；真实效果还需要在 PostgreSQL 环境冒烟验证。
 - 当前收费、订单、会员、支付最后做，尚未进入实现。
 - 当前后台 UI 是管理 MVP，不代表最终商业化后台视觉。
 - 当前客户聊天前端由外部团队开发，本仓库主要提供后端接口和后台管理能力。
@@ -121,7 +121,7 @@ python -m app.worker
 ## 下一步建议
 
 1. 在服务器上部署真实 Redis，跑 API 进程和 worker 进程分离冒烟验证。
-2. 接 Postgres + pgvector，做真实向量列写入和 ANN 检索。
+2. 在服务器上接 Postgres + pgvector，跑真实向量列写入和 ANN 检索冒烟。
 3. 把 `app/services.py` 按领域拆分，降低单文件复杂度。
 4. 完善训练中心的资料删除、归档、版本清理和质检规则。
 5. 接真实八字排盘服务，补大运、流年、十神、旺衰等结构。

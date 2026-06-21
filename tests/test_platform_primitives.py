@@ -2,6 +2,7 @@ import pytest
 import types
 import json
 from pathlib import Path
+from datetime import UTC, datetime
 
 
 def test_local_object_storage_writes_bytes_and_blocks_path_escape(tmp_path):
@@ -210,6 +211,125 @@ def test_openai_embedding_provider_without_key_falls_back_to_mock(monkeypatch):
         assert payload["features"]
     finally:
         get_settings.cache_clear()
+
+
+def test_pgvector_literal_formats_openai_embedding_vector():
+    from app.services import embedding_vector_literal
+
+    payload = {"vector": [0.1, -0.25, "3.5"], "dimensions": 3}
+
+    assert embedding_vector_literal(payload) == "[0.1,-0.25,3.5]"
+    assert embedding_vector_literal({"features": {"abc": 1.0}}) == ""
+
+
+def test_sync_pgvector_embedding_updates_postgres_vector_column_only():
+    from app.services import sync_pgvector_embedding
+
+    class FakeDialect:
+        def __init__(self, name):
+            self.name = name
+
+    class FakeBind:
+        def __init__(self, name):
+            self.dialect = FakeDialect(name)
+
+    class FakeSession:
+        def __init__(self, dialect_name):
+            self.bind = FakeBind(dialect_name)
+            self.calls = []
+
+        def get_bind(self):
+            return self.bind
+
+        def execute(self, statement, params):
+            self.calls.append((str(statement), params))
+
+    postgres = FakeSession("postgresql")
+    sqlite = FakeSession("sqlite")
+    payload = {"vector": [0.1, 0.2, 0.3]}
+
+    assert sync_pgvector_embedding(postgres, "knowledge_chunks", 9, payload) is True
+    sql, params = postgres.calls[0]
+    assert "UPDATE knowledge_chunks SET embedding = CAST(:embedding AS vector)" in sql
+    assert params == {"embedding": "[0.1,0.2,0.3]", "id": 9}
+
+    assert sync_pgvector_embedding(sqlite, "knowledge_chunks", 9, payload) is False
+    assert sqlite.calls == []
+
+
+def test_pgvector_knowledge_search_uses_vector_operator_and_preserves_score():
+    from app.services import search_knowledge_with_pgvector
+
+    class FakeDialect:
+        name = "postgresql"
+
+    class FakeBind:
+        dialect = FakeDialect()
+
+    class FakeRows:
+        def mappings(self):
+            return self
+
+        def all(self):
+            return [{"id": 2, "semantic_score": 0.91}, {"id": 1, "semantic_score": 0.72}]
+
+    class FakeScalars:
+        def all(self):
+            now = datetime(2026, 6, 21, tzinfo=UTC)
+            return [
+                types.SimpleNamespace(
+                    id=1,
+                    source_id=1,
+                    title="普通内容",
+                    content="普通内容",
+                    tags=["八字"],
+                    chunk_index=1,
+                    embedding_payload={"provider": "openai", "model": "text-embedding-3-small", "hash": "a", "dimensions": 3},
+                    embedding_model="text-embedding-3-small",
+                    embedding_hash="a",
+                    created_at=now,
+                ),
+                types.SimpleNamespace(
+                    id=2,
+                    source_id=1,
+                    title="甲木事业",
+                    content="甲木日主适合主动开局。",
+                    tags=["八字", "事业"],
+                    chunk_index=2,
+                    embedding_payload={"provider": "openai", "model": "text-embedding-3-small", "hash": "b", "dimensions": 3},
+                    embedding_model="text-embedding-3-small",
+                    embedding_hash="b",
+                    created_at=now,
+                ),
+            ]
+
+    class FakeSession:
+        def __init__(self):
+            self.executed = []
+
+        def get_bind(self):
+            return FakeBind()
+
+        def execute(self, statement, params):
+            self.executed.append((str(statement), params))
+            return FakeRows()
+
+        def scalars(self, query):
+            return FakeScalars()
+
+    session = FakeSession()
+    results = search_knowledge_with_pgvector(
+        session,
+        {"provider": "openai", "model": "text-embedding-3-small", "vector": [0.1, 0.2, 0.3]},
+        tags=["事业"],
+        limit=1,
+    )
+
+    sql, params = session.executed[0]
+    assert "embedding <=> CAST(:embedding AS vector)" in sql
+    assert params["embedding"] == "[0.1,0.2,0.3]"
+    assert results[0]["title"] == "甲木事业"
+    assert results[0]["semantic_score"] == 0.91
 
 
 def test_runtime_builds_redis_task_queue_and_rate_limiter(monkeypatch):
