@@ -696,6 +696,92 @@ def test_knowledge_source_merge_rejects_different_content_by_default():
     assert client.get(f"/api/knowledge-chunks?source_id={source['id']}").json()["items"]
 
 
+def test_knowledge_cleanup_recommendations_include_duplicate_merge_and_archived_delete():
+    unique = uuid4().hex
+    content = f"# 清理建议 {unique}\n重复内容用于生成合并建议。"
+    canonical = client.post(
+        "/api/knowledge-sources",
+        json={"title": f"清理主源 {unique}", "source_type": "markdown", "content": content, "tags": ["清理建议"]},
+    ).json()
+    duplicate = client.post(
+        "/api/knowledge-sources",
+        json={"title": f"清理重复源 {unique}", "source_type": "markdown", "content": content, "tags": ["清理建议"]},
+    ).json()
+    archived = client.post(
+        "/api/knowledge-sources",
+        json={
+            "title": f"清理归档源 {unique}",
+            "source_type": "markdown",
+            "content": f"# 清理归档 {unique}\n这份资料已归档且未被训练引用。",
+            "tags": ["清理建议"],
+        },
+    ).json()
+    client.post(f"/api/knowledge-sources/{archived['id']}/archive", json={})
+
+    response = client.get("/api/knowledge/cleanup-recommendations")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summary"]["total"] >= 2
+    recommendations = data["items"]
+    merge = next(
+        item
+        for item in recommendations
+        if item["action"] == "merge_duplicate_source"
+        and item["source_id"] == duplicate["id"]
+        and item["target_source_id"] == canonical["id"]
+    )
+    assert merge["method"] == "POST"
+    assert merge["endpoint"] == f"/api/knowledge-sources/{duplicate['id']}/merge"
+    assert merge["payload"]["target_source_id"] == canonical["id"]
+
+    delete = next(item for item in recommendations if item["action"] == "delete_archived_unused_source" and item["source_id"] == archived["id"])
+    assert delete["method"] == "DELETE"
+    assert delete["endpoint"] == f"/api/knowledge-sources/{archived['id']}"
+
+
+def test_cleanup_recommendations_do_not_delete_archived_referenced_source():
+    unique = uuid4().hex
+    source = client.post(
+        "/api/knowledge-sources",
+        json={
+            "title": f"被引用归档源 {unique}",
+            "source_type": "markdown",
+            "content": f"# 被引用 {unique}\n这份资料被训练运行引用。",
+            "tags": ["清理建议"],
+        },
+    ).json()
+    run = client.post(
+        "/api/training/runs",
+        json={
+            "source_id": source["id"],
+            "simulate_model_response": [
+                {
+                    "title": "引用规则",
+                    "body": "用于确认被训练运行引用的资料不进入硬删除建议。",
+                    "domain": "astrology",
+                    "tags": ["清理建议"],
+                    "rule_type": "test",
+                    "use_when": "清理建议测试",
+                    "avoid_when": "不要误删历史链路",
+                    "examples": [],
+                    "confidence": 0.9,
+                }
+            ],
+        },
+    )
+    assert run.status_code == 200
+    client.post(f"/api/knowledge-sources/{source['id']}/archive", json={})
+
+    response = client.get("/api/knowledge/cleanup-recommendations")
+
+    assert response.status_code == 200
+    assert not any(
+        item["action"] == "delete_archived_unused_source" and item["source_id"] == source["id"]
+        for item in response.json()["items"]
+    )
+
+
 def test_manual_knowledge_entry_can_be_created_and_listed():
     response = client.post(
         "/api/knowledge-entries",

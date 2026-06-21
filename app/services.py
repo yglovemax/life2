@@ -257,16 +257,20 @@ def delete_knowledge_source(session: Session, source_id: int) -> dict | None:
     source = session.get(KnowledgeSource, source_id)
     if source is None:
         return None
-    referenced_run_id = session.scalar(
-        select(TrainingRun.id)
-        .where((TrainingRun.source_id == source.id) | (TrainingRun.published_source_id == source.id))
-        .limit(1)
-    )
-    if referenced_run_id:
+    if knowledge_source_is_referenced(session, source.id):
         raise ValueError("训练资料已被训练运行引用，请先归档，避免破坏版本记录。")
     session.delete(source)
     session.commit()
     return {"deleted": True, "source_id": source_id}
+
+
+def knowledge_source_is_referenced(session: Session, source_id: int) -> bool:
+    referenced_run_id = session.scalar(
+        select(TrainingRun.id)
+        .where((TrainingRun.source_id == source_id) | (TrainingRun.published_source_id == source_id))
+        .limit(1)
+    )
+    return bool(referenced_run_id)
 
 
 def merge_knowledge_source(session: Session, source_id: int, payload: dict) -> dict | None:
@@ -1039,6 +1043,76 @@ def list_knowledge_duplicate_groups(session: Session) -> list[dict]:
         )
     rows.sort(key=lambda item: (item["active_count"], item["source_count"]), reverse=True)
     return rows
+
+
+def list_knowledge_cleanup_recommendations(session: Session) -> dict:
+    sources = session.scalars(select(KnowledgeSource).order_by(KnowledgeSource.created_at.asc(), KnowledgeSource.id.asc())).all()
+    sources_by_id = {source.id: source for source in sources}
+    items: list[dict] = []
+
+    for group in list_knowledge_duplicate_groups(session):
+        canonical_id = group["canonical_source"]["id"]
+        canonical = sources_by_id.get(canonical_id)
+        if canonical is None:
+            continue
+        for source_data in group["sources"]:
+            source_id = source_data["id"]
+            source = sources_by_id.get(source_id)
+            if source is None or source.id == canonical_id or source.status != "active":
+                continue
+            items.append(
+                {
+                    "id": f"merge_duplicate_source:{source.id}:{canonical.id}",
+                    "action": "merge_duplicate_source",
+                    "severity": "medium",
+                    "source_id": source.id,
+                    "target_source_id": canonical.id,
+                    "title": "合并重复知识源",
+                    "reason": "内容指纹完全一致，建议把重复源合并到主源并归档重复源。",
+                    "method": "POST",
+                    "endpoint": f"/api/knowledge-sources/{source.id}/merge",
+                    "payload": {"target_source_id": canonical.id},
+                    "safe_to_run": True,
+                    "source": serialize_source(source),
+                    "target": serialize_source(canonical),
+                }
+            )
+
+    for source in sources:
+        if source.status != "archived":
+            continue
+        if knowledge_source_is_referenced(session, source.id):
+            continue
+        items.append(
+            {
+                "id": f"delete_archived_unused_source:{source.id}",
+                "action": "delete_archived_unused_source",
+                "severity": "low",
+                "source_id": source.id,
+                "target_source_id": None,
+                "title": "删除已归档且未引用知识源",
+                "reason": "资料已归档且没有训练运行引用，可以考虑硬删除以减少后台噪音。",
+                "method": "DELETE",
+                "endpoint": f"/api/knowledge-sources/{source.id}",
+                "payload": {},
+                "safe_to_run": True,
+                "source": serialize_source(source),
+                "target": None,
+            }
+        )
+
+    severity_order = {"medium": 0, "low": 1}
+    items.sort(key=lambda item: (severity_order.get(item["severity"], 9), item["action"], item["source_id"]))
+    action_counts: dict[str, int] = {}
+    for item in items:
+        action_counts[item["action"]] = action_counts.get(item["action"], 0) + 1
+    return {
+        "summary": {
+            "total": len(items),
+            "by_action": action_counts,
+        },
+        "items": items,
+    }
 
 
 def knowledge_source_fingerprint(content: str) -> str:

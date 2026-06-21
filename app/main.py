@@ -45,6 +45,7 @@ from app.services import (
     list_fallback_alerts,
     list_issues,
     list_knowledge_chunks,
+    list_knowledge_cleanup_recommendations,
     list_knowledge_duplicate_groups,
     list_knowledge_sources,
     list_call_traces,
@@ -528,6 +529,11 @@ def knowledge_sources(session: Session = Depends(get_session)) -> dict:
 @app.get("/api/knowledge/duplicates")
 def knowledge_duplicates(session: Session = Depends(get_session)) -> dict:
     return {"items": list_knowledge_duplicate_groups(session)}
+
+
+@app.get("/api/knowledge/cleanup-recommendations")
+def knowledge_cleanup_recommendations(session: Session = Depends(get_session)) -> dict:
+    return list_knowledge_cleanup_recommendations(session)
 
 
 @app.post("/api/knowledge-sources")

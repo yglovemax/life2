@@ -57,6 +57,7 @@
 | 资料归档/恢复/删除 | done | `/api/knowledge-sources/{source_id}/archive`, `/restore`, `DELETE` | 归档不进检索；硬删除只允许未被训练运行引用的资料 |
 | 重复资料提示 | done | `/api/knowledge-sources` | 创建资料时返回 `duplicate` 元信息 |
 | 重复资料合并 | done | `/api/knowledge/duplicates`, `/api/knowledge-sources/{source_id}/merge` | 查重复组；合并后重复源归档并写审计 |
+| 知识清理建议 | done | `/api/knowledge/cleanup-recommendations` | 只读建议清单，提示可合并/可删除项 |
 
 ## App 用户、盘面和聊天
 

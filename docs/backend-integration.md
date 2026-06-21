@@ -90,6 +90,7 @@ POST /api/knowledge-entries
 GET /api/knowledge-sources
 GET /api/knowledge-chunks
 GET /api/knowledge/duplicates
+GET /api/knowledge/cleanup-recommendations
 POST /api/knowledge/search
 ```
 
@@ -159,6 +160,43 @@ GET /api/knowledge/duplicates
 ```
 
 如果两份内容不一致，默认返回 `400`，避免误合并。确有人工确认的特殊情况，可传 `force=true`。
+
+清理建议：
+
+```http
+GET /api/knowledge/cleanup-recommendations
+```
+
+该接口只生成建议，不会执行删除或合并。当前会返回两类建议：
+
+- `merge_duplicate_source`：内容指纹完全一致，建议调用 merge 合并重复源。
+- `delete_archived_unused_source`：资料已归档且没有训练运行引用，建议走 DELETE 硬删除。
+
+返回示例：
+
+```json
+{
+  "summary": {
+    "total": 2,
+    "by_action": {
+      "merge_duplicate_source": 1,
+      "delete_archived_unused_source": 1
+    }
+  },
+  "items": [
+    {
+      "action": "merge_duplicate_source",
+      "severity": "medium",
+      "source_id": 12,
+      "target_source_id": 8,
+      "method": "POST",
+      "endpoint": "/api/knowledge-sources/12/merge",
+      "payload": {"target_source_id": 8},
+      "safe_to_run": true
+    }
+  ]
+}
+```
 
 知识片段创建后会自动生成本地 mock embedding 元数据，返回的 chunk 会包含：
 
