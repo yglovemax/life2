@@ -59,6 +59,7 @@
 | 重复资料合并 | done | `/api/knowledge/duplicates`, `/api/knowledge-sources/{source_id}/merge` | 查重复组；合并后重复源归档并写审计 |
 | 知识清理建议 | done | `/api/knowledge/cleanup-recommendations` | 只读建议清单，提示可合并/可删除项 |
 | 知识清理执行 | done | `/api/knowledge/cleanup-recommendations/execute` | 批量执行有效建议并写审计 |
+| 算法库 | done | `/api/algorithms`, `/api/algorithms/uploads` | JSON rule_spec 算法草稿、上传、测试、发布、正式执行和运行记录 |
 
 ## App 用户、盘面和聊天
 
@@ -97,6 +98,7 @@
 | 八字资料保存 | done | birth profile | 保存四柱、日主、五行、十神等输入快照 |
 | 八字事实注入 | done | render app page/module | 自动注入 `bazi_facts`、`pillars`、`day_master` |
 | 八字算法 HTTP 占位 | partial | `NEXA_BAZI_CALC_MODE=live` | 真实算法服务待接入 |
+| 八字规则算法库 | partial | `/api/algorithms` | 已支持 JSON 规则算法；后续需补完整排盘、大运、流年算法规则 |
 | 大运/流年完整计算 | planned | 未实现 | 需要外部算法或本地排盘引擎 |
 
 ## 生产底座

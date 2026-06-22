@@ -209,6 +209,31 @@
             </section>
 
             <section class="section">
+              <h3>算法库</h3>
+              <div class="upload-zone compact-upload">
+                <div>
+                  <strong>上传算法 JSON</strong>
+                  <p>第一版只支持安全规则配置，不执行 Python、JS 或 Shell 代码。</p>
+                </div>
+                <label class="file-picker">
+                  选择 JSON
+                  <input id="algorithmUploadInput" type="file" accept=".json,application/json" />
+                </label>
+              </div>
+              <div class="actions">
+                <button class="secondary compact" id="uploadAlgorithmFileButton">上传算法</button>
+              </div>
+              <div class="form-grid">
+                <label class="wide">算法配置 JSON
+                  <textarea id="algorithmJson" placeholder='{"slug":"bazi-day-master-score","name":"日主评分算法","domain":"bazi","algorithm_type":"rule_spec","spec":{"output_template":{"day_master":"{{input.day_master}}","score":"{{map.day_master_scores[input.day_master]}}"},"maps":{"day_master_scores":{"甲木":82,"乙木":76}}},"input_schema":{"required":["day_master"]},"output_schema":{"required":["day_master","score"]}}'></textarea>
+                </label>
+              </div>
+              <div class="actions">
+                <button class="primary compact" id="saveAlgorithmButton">创建算法草稿</button>
+              </div>
+            </section>
+
+            <section class="section">
               <h3>上传 Markdown 文档</h3>
               <div class="form-grid">
                 <label>资料名称
@@ -271,6 +296,27 @@
             <section class="section">
               <h3>资料来源</h3>
               <div class="trace-list" id="knowledgeSources"></div>
+            </section>
+            <section class="section">
+              <h3>算法测试台</h3>
+              <div class="form-grid">
+                <label class="wide">算法
+                  <select id="algorithmSelect"></select>
+                </label>
+                <label class="wide">输入 JSON
+                  <textarea id="algorithmTestInput" placeholder='{"day_master":"甲木"}'></textarea>
+                </label>
+              </div>
+              <div class="actions">
+                <button class="secondary compact" id="testAlgorithmButton">测试执行</button>
+                <button class="primary compact" id="publishAlgorithmButton">发布版本</button>
+                <button class="secondary compact" id="executeAlgorithmButton">正式执行</button>
+              </div>
+              <div class="trace-list" id="algorithmRunResult"></div>
+            </section>
+            <section class="section">
+              <h3>算法列表</h3>
+              <div class="trace-list" id="algorithmList"></div>
             </section>
             <section class="section">
               <h3>知识片段</h3>

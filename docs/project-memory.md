@@ -31,6 +31,7 @@
 - 重复知识组查询和安全合并归档，合并动作写入审计。
 - 知识清理建议清单：只读返回可合并重复源和可删除归档未引用源。
 - 知识清理批处理执行：只执行当前仍有效建议，批处理写入审计。
+- 算法库第一版：上传 JSON rule_spec、创建草稿、测试执行、发布版本、正式执行和运行记录。
 - AI 训练运行：同步、队列、失败重试、取消、发布。
 - 训练草稿发布前质检：阻断高风险词、绝对化承诺、医疗/法律/投资风险和低置信度内容。
 - 训练质检审计：训练详情返回 `quality_events`，全局审计记录通过、阻断和 override。
@@ -52,6 +53,7 @@
 - 前端：当前仓库保留后台管理 MVP 静态页面，客户前端由外部团队集成 `/api/app/*`。
 - 学习方式：RAG/知识库检索，不训练或修改基础模型权重。
 - 训练资料流程：资料上传或导入 -> 解析 -> AI 结构化草稿 -> 人工发布 -> 知识检索。
+- 算法方式：算法库和知识库分离。算法库只执行安全 JSON 规则配置，先输出结构化计算结果，再给模型或模块表达；不执行上传的任意代码。
 - 用户记忆：不把全部历史聊天塞进 prompt；保留用户资料、长期摘要、少量可检索记忆和最近对话。
 - 模型调用：默认 mock，生产通过 `NEXA_MODEL_CALL_MODE=live` 和 `NEXA_OPENAI_API_KEY` 开启真实模型。
 - 模型供应商 Key：数据库只保存哈希和前缀，不保存可逆明文。
@@ -105,6 +107,11 @@ python -m app.worker
 - 重复知识合并：`POST /api/knowledge-sources/{source_id}/merge`
 - 知识清理建议：`GET /api/knowledge/cleanup-recommendations`
 - 知识清理执行：`POST /api/knowledge/cleanup-recommendations/execute`
+- 算法库：`GET /api/algorithms`
+- 算法上传：`POST /api/algorithms/uploads`
+- 算法测试：`POST /api/algorithms/{algorithm_id}/test-run`
+- 算法发布：`POST /api/algorithms/{algorithm_id}/publish`
+- 算法执行：`POST /api/algorithms/{algorithm_id}/execute`
 - 训练运行：`POST /api/training/runs`
 - 训练质检报告：`GET /api/training/runs/{run_id}/quality-report`
 - 训练质检审计：`GET /api/training/runs/{run_id}` 返回 `quality_events`

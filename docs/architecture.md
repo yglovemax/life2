@@ -18,6 +18,12 @@
 资料上传/导入 -> 结构化切分 -> AI 训练草稿 -> 人工发布 -> 检索使用
 ```
 
+平台算法流程是：
+
+```text
+算法 JSON 上传/创建 -> 草稿版本 -> 测试执行 -> 发布版本 -> 正式执行 -> 结构化结果进入模块/聊天上下文
+```
+
 ## 产品边界
 
 一期最初接入：
@@ -31,6 +37,7 @@
 - 八字日运页
 - 客户聊天和长期记忆
 - 训练资料上传、GitHub 导入、AI 训练发布
+- 算法库 JSON 规则上传、测试、发布和执行
 - 模型路由、输出策略、供应商 Key 管理
 - 生产化底座：迁移、worker、队列、限流、embedding
 
@@ -77,6 +84,7 @@ tests/
 - `ModuleVersion`：模块版本快照。
 - `Issue`：问题类型、负责人和处理状态。
 - `KnowledgeSource`、`KnowledgeChunk`：知识资料和知识切片。
+- `AlgorithmDefinition`、`AlgorithmVersion`、`AlgorithmRun`：算法定义、版本和执行记录。
 - `TrainingRun`、`TrainingDraftChunk`：AI 训练运行和草稿知识块。
 - `AppUser`、`BirthProfile`：客户端用户、出生资料、本命资料和盘面快照。
 - `ChatSession`、`ChatMessage`：聊天会话和消息。
@@ -101,7 +109,8 @@ tests/
 12. 聊天接口组合本命资料、盘面快照、知识命中、长期记忆和最近对话，再生成同步或 SSE 回复。
 13. 聊天回复后自动抽取长期记忆，可同步更新摘要，也可交给 `memory.summarize` 队列任务。
 14. 训练资料通过上传或 GitHub 导入进入知识库，AI 训练运行生成草稿，发布后进入检索环境。
-15. worker 可异步消费训练、长期记忆摘要和 embedding 重建任务。
+15. 算法库执行已发布 JSON rule_spec，输出结构化计算结果；当前不执行任意代码。
+16. worker 可异步消费训练、长期记忆摘要和 embedding 重建任务。
 
 ## 运行时组件
 

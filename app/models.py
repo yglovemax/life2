@@ -253,6 +253,63 @@ class KnowledgeChunk(Base):
     source: Mapped[KnowledgeSource] = relationship(back_populates="chunks")
 
 
+class AlgorithmDefinition(Base):
+    __tablename__ = "algorithm_definitions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(180))
+    domain: Mapped[str] = mapped_column(String(80), default="general", index=True)
+    algorithm_type: Mapped[str] = mapped_column(String(40), default="rule_spec", index=True)
+    status: Mapped[str] = mapped_column(String(40), default="draft", index=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    current_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(80), default="admin")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+    versions: Mapped[list[AlgorithmVersion]] = relationship(back_populates="algorithm", cascade="all, delete-orphan")
+    runs: Mapped[list[AlgorithmRun]] = relationship(back_populates="algorithm", cascade="all, delete-orphan")
+
+
+class AlgorithmVersion(Base):
+    __tablename__ = "algorithm_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    algorithm_id: Mapped[int] = mapped_column(ForeignKey("algorithm_definitions.id"), index=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(40), default="draft", index=True)
+    spec: Mapped[dict] = mapped_column(JSON, default=dict)
+    input_schema: Mapped[dict] = mapped_column(JSON, default=dict)
+    output_schema: Mapped[dict] = mapped_column(JSON, default=dict)
+    notes: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(80), default="admin")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    algorithm: Mapped[AlgorithmDefinition] = relationship(back_populates="versions")
+    runs: Mapped[list[AlgorithmRun]] = relationship(back_populates="version")
+
+
+class AlgorithmRun(Base):
+    __tablename__ = "algorithm_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    algorithm_id: Mapped[int] = mapped_column(ForeignKey("algorithm_definitions.id"), index=True)
+    version_id: Mapped[int | None] = mapped_column(ForeignKey("algorithm_versions.id"), nullable=True, index=True)
+    run_mode: Mapped[str] = mapped_column(String(40), default="test", index=True)
+    status: Mapped[str] = mapped_column(String(40), default="ok", index=True)
+    input_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    output_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(80), default="admin")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    algorithm: Mapped[AlgorithmDefinition] = relationship(back_populates="runs")
+    version: Mapped[AlgorithmVersion | None] = relationship(back_populates="runs")
+
+
 class TrainingRun(Base):
     __tablename__ = "training_runs"
 

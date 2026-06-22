@@ -17,6 +17,7 @@ from app.services import (
     append_chat_message,
     cancel_training_run,
     calculate_user_chart,
+    create_algorithm,
     create_chat_session,
     create_embedding_rebuild_job,
     create_issue,
@@ -31,9 +32,11 @@ from app.services import (
     create_training_run,
     delete_knowledge_source,
     execute_knowledge_cleanup_recommendations,
+    execute_algorithm,
     chat_reply_sse_events,
     generate_chat_reply,
     get_app_user,
+    get_algorithm,
     get_chat_session,
     get_module_detail,
     get_training_run,
@@ -41,6 +44,7 @@ from app.services import (
     get_user_chart,
     knowledge_taxonomy,
     import_github_knowledge_sources,
+    list_algorithms,
     list_app_api_keys,
     list_audit_events,
     list_fallback_alerts,
@@ -87,6 +91,9 @@ from app.services import (
     update_knowledge_source_status,
     upsert_memory_summary,
     upload_knowledge_files,
+    publish_algorithm,
+    run_algorithm_test,
+    upload_algorithm_files,
 )
 
 
@@ -520,6 +527,68 @@ def models(session: Session = Depends(get_session)) -> dict:
 @app.get("/api/test-users")
 def test_users() -> dict:
     return {"items": list_test_users()}
+
+
+@app.get("/api/algorithms")
+def algorithms(session: Session = Depends(get_session)) -> dict:
+    return {"items": list_algorithms(session)}
+
+
+@app.post("/api/algorithms")
+def algorithm_create(payload: dict, session: Session = Depends(get_session)) -> dict:
+    try:
+        return create_algorithm(session, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/algorithms/uploads")
+def algorithm_uploads(payload: dict, session: Session = Depends(get_session)) -> dict:
+    try:
+        return upload_algorithm_files(session, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/algorithms/{algorithm_id}")
+def algorithm_detail(algorithm_id: int, session: Session = Depends(get_session)) -> dict:
+    algorithm = get_algorithm(session, algorithm_id)
+    if algorithm is None:
+        raise HTTPException(status_code=404, detail="algorithm not found")
+    return algorithm
+
+
+@app.post("/api/algorithms/{algorithm_id}/test-run")
+def algorithm_test_run(algorithm_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
+    try:
+        run = run_algorithm_test(session, algorithm_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if run is None:
+        raise HTTPException(status_code=404, detail="algorithm not found")
+    return run
+
+
+@app.post("/api/algorithms/{algorithm_id}/publish")
+def algorithm_publish(algorithm_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
+    try:
+        algorithm = publish_algorithm(session, algorithm_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if algorithm is None:
+        raise HTTPException(status_code=404, detail="algorithm not found")
+    return algorithm
+
+
+@app.post("/api/algorithms/{algorithm_id}/execute")
+def algorithm_execute(algorithm_id: int, payload: dict, session: Session = Depends(get_session)) -> dict:
+    try:
+        run = execute_algorithm(session, algorithm_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if run is None:
+        raise HTTPException(status_code=404, detail="algorithm not found")
+    return run
 
 
 @app.get("/api/knowledge-sources")

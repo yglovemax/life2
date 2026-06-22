@@ -41,6 +41,7 @@ tests/                    API、服务、平台底座测试
 - App 正式接口：`/api/app/*`
 - 模块管理：`/api/modules/*`
 - 知识库：`/api/knowledge-*`、`/api/knowledge/*`
+- 算法库：`/api/algorithms/*`
 - 训练：`/api/training/*`
 - embedding：`/api/embeddings/rebuild`
 - 测试和追踪：`/api/test-runs/*`、`/api/call-traces/*`
@@ -57,6 +58,7 @@ tests/                    API、服务、平台底座测试
 - 模块和发布：`list_modules`、`get_module_detail`、`create_module`、`update_module`、`publish_module`、`rollback_module`
 - 模型调用和输出校验：`run_module_trace`、`resolve_model_response`、`validate_model_output`
 - 知识库：`create_knowledge_source`、`upload_knowledge_files`、`import_github_knowledge_sources`、`search_knowledge`
+- 算法库：`create_algorithm`、`upload_algorithm_files`、`publish_algorithm`、`run_algorithm_test`、`execute_algorithm`
 - 训练：`create_training_run`、`execute_training_run_job`、`retry_training_run`、`publish_training_run`
 - embedding：`build_text_embedding_payload`、`apply_text_embedding`、`create_embedding_rebuild_job`、`execute_embedding_rebuild_job`
 - App 用户和盘面：`create_or_update_app_user`、`save_birth_profile`、`get_user_chart`、`calculate_user_chart`
@@ -73,6 +75,7 @@ tests/                    API、服务、平台底座测试
 - 模型和输出：`ModelConfig`、`ModelProviderKey`、`OutputPolicy`
 - 调用追踪：`CallTrace`、`Issue`
 - 知识和训练：`KnowledgeSource`、`KnowledgeChunk`、`TrainingRun`、`TrainingDraftChunk`
+- 算法库：`AlgorithmDefinition`、`AlgorithmVersion`、`AlgorithmRun`
 - App 用户：`AppUser`、`BirthProfile`
 - 聊天和记忆：`ChatSession`、`ChatMessage`、`UserMemorySummary`、`MemoryItem`
 - 安全：`AppApiKey`、`AuditEvent`、`AdminUser`、`AdminSession`
@@ -145,6 +148,7 @@ tests/                    API、服务、平台底座测试
 - `test_training_ingestion.py`：训练资料解析和知识检索。
 - `test_training_runs_api.py`：AI 训练运行、发布、失败、重试、取消、队列。
 - `test_embedding_rebuild_api.py`：embedding 同步/队列重建。
+- `test_algorithm_registry_api.py`：算法库创建、上传、测试、发布和正式执行。
 - `test_platform_primitives.py`：对象存储、队列、限流、Redis 工厂、OpenAI embedding provider。
 
 ## 新增功能落点规则

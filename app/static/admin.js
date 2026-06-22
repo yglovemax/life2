@@ -4,6 +4,7 @@ let modelConfigs = [];
 let testUsers = [];
 let knowledgeSources = [];
 let knowledgeChunks = [];
+let algorithms = [];
 let selectedModuleId = null;
 let currentDetail = null;
 let draftFields = [];
@@ -857,6 +858,11 @@ function setupKnowledgeActions() {
   document.querySelector("#refreshKnowledgeButton").onclick = renderKnowledgeWorkspace;
   document.querySelector("#uploadKnowledgeFilesButton").onclick = uploadSelectedKnowledgeFiles;
   document.querySelector("#importGithubKnowledgeButton").onclick = importGithubKnowledge;
+  document.querySelector("#saveAlgorithmButton").onclick = saveAlgorithmDraft;
+  document.querySelector("#uploadAlgorithmFileButton").onclick = uploadAlgorithmFile;
+  document.querySelector("#testAlgorithmButton").onclick = () => runSelectedAlgorithm("test-run");
+  document.querySelector("#publishAlgorithmButton").onclick = publishSelectedAlgorithm;
+  document.querySelector("#executeAlgorithmButton").onclick = () => runSelectedAlgorithm("execute");
   document.querySelector("#knowledgeUploadInput").onchange = (event) => {
     pendingKnowledgeUploadFiles = Array.from(event.target.files || []);
     renderKnowledgeUploadFileList();
@@ -879,12 +885,14 @@ async function renderKnowledgeWorkspace() {
   await loadKnowledgeData();
   renderKnowledgeSources();
   renderKnowledgeChunks();
+  renderAlgorithms();
 }
 
 async function loadKnowledgeData() {
-  const [sourcesData, chunksData] = await Promise.all([getJson("/api/knowledge-sources"), getJson("/api/knowledge-chunks")]);
+  const [sourcesData, chunksData, algorithmData] = await Promise.all([getJson("/api/knowledge-sources"), getJson("/api/knowledge-chunks"), getJson("/api/algorithms")]);
   knowledgeSources = sourcesData.items;
   knowledgeChunks = chunksData.items;
+  algorithms = algorithmData.items;
 }
 
 async function saveMarkdownKnowledge() {
@@ -1001,6 +1009,90 @@ async function importGithubKnowledge() {
   }
 }
 
+async function saveAlgorithmDraft() {
+  const notice = document.querySelector("#knowledgeNotice");
+  try {
+    const raw = document.querySelector("#algorithmJson").value.trim();
+    if (!raw) throw new Error("请先粘贴算法 JSON 配置");
+    const payload = JSON.parse(raw);
+    const saved = await getJson("/api/algorithms", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    notice.innerHTML = `<div class="notice">算法「${escapeHtml(saved.name)}」已创建为草稿版本</div>`;
+    document.querySelector("#algorithmJson").value = "";
+    await renderKnowledgeWorkspace();
+    document.querySelector("#algorithmSelect").value = saved.id;
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function uploadAlgorithmFile() {
+  const notice = document.querySelector("#knowledgeNotice");
+  const file = document.querySelector("#algorithmUploadInput").files?.[0];
+  try {
+    if (!file) throw new Error("请先选择算法 JSON 文件");
+    const data = await getJson("/api/algorithms/uploads", {
+      method: "POST",
+      body: JSON.stringify({
+        files: [
+          {
+            filename: file.name,
+            content_type: file.type || "application/json",
+            content_base64: await readFileAsBase64(file),
+          },
+        ],
+      }),
+    });
+    notice.innerHTML = `<div class="notice">已上传 ${data.uploaded} 个算法草稿</div>`;
+    document.querySelector("#algorithmUploadInput").value = "";
+    await renderKnowledgeWorkspace();
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function publishSelectedAlgorithm() {
+  const notice = document.querySelector("#knowledgeNotice");
+  const algorithmId = document.querySelector("#algorithmSelect").value;
+  try {
+    if (!algorithmId) throw new Error("请先选择算法");
+    const saved = await getJson(`/api/algorithms/${algorithmId}/publish`, {
+      method: "POST",
+      body: JSON.stringify({ operator: "admin" }),
+    });
+    notice.innerHTML = `<div class="notice">算法「${escapeHtml(saved.name)}」已发布，可用于正式执行</div>`;
+    await renderKnowledgeWorkspace();
+    document.querySelector("#algorithmSelect").value = algorithmId;
+  } catch (error) {
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function runSelectedAlgorithm(mode) {
+  const notice = document.querySelector("#knowledgeNotice");
+  const resultBox = document.querySelector("#algorithmRunResult");
+  const algorithmId = document.querySelector("#algorithmSelect").value;
+  try {
+    if (!algorithmId) throw new Error("请先选择算法");
+    const raw = document.querySelector("#algorithmTestInput").value.trim();
+    const inputPayload = raw ? JSON.parse(raw) : {};
+    const run = await getJson(`/api/algorithms/${algorithmId}/${mode}`, {
+      method: "POST",
+      body: JSON.stringify({ input_payload: inputPayload, operator: "admin" }),
+    });
+    resultBox.innerHTML = algorithmRunCard(run);
+    notice.innerHTML = `<div class="notice">算法${mode === "execute" ? "正式" : "测试"}执行完成</div>`;
+    await loadKnowledgeData();
+    renderAlgorithms();
+    document.querySelector("#algorithmSelect").value = algorithmId;
+  } catch (error) {
+    resultBox.innerHTML = "";
+    notice.innerHTML = `<div class="danger">${escapeHtml(error.message)}</div>`;
+  }
+}
+
 async function saveManualKnowledge() {
   const notice = document.querySelector("#knowledgeNotice");
   try {
@@ -1053,6 +1145,37 @@ function renderKnowledgeChunks() {
   document.querySelector("#knowledgeChunks").innerHTML = knowledgeChunks.length
     ? knowledgeChunks.slice(0, 20).map(knowledgeChunkCard).join("")
     : '<p class="empty">还没有知识片段。</p>';
+}
+
+function renderAlgorithms() {
+  const selected = document.querySelector("#algorithmSelect").value;
+  document.querySelector("#algorithmSelect").innerHTML = algorithms.length
+    ? algorithms.map((item) => `<option value="${item.id}">${escapeHtml(item.name)} · ${escapeHtml(item.status)} · v${escapeHtml(item.active_version?.version || item.versions?.[0]?.version || 1)}</option>`).join("")
+    : '<option value="">还没有算法</option>';
+  if (selected && algorithms.some((item) => String(item.id) === String(selected))) {
+    document.querySelector("#algorithmSelect").value = selected;
+  }
+  document.querySelector("#algorithmList").innerHTML = algorithms.length
+    ? algorithms.map(algorithmCard).join("")
+    : '<p class="empty">还没有算法。可以上传 JSON 规则配置创建第一个算法。</p>';
+}
+
+function algorithmCard(algorithm) {
+  const active = algorithm.active_version;
+  return `<article class="trace-card">
+    <span>#${algorithm.id} · ${escapeHtml(algorithm.domain)} · ${escapeHtml(algorithm.algorithm_type)} · ${escapeHtml(algorithm.status)}</span>
+    <p><strong>${escapeHtml(algorithm.name)}</strong></p>
+    <p>${escapeHtml(algorithm.description || algorithm.slug)}</p>
+    <p>版本：${algorithm.versions?.length || 0} · 运行：${algorithm.run_count || 0}${active ? ` · 活跃版本：v${active.version}` : " · 未发布"}</p>
+  </article>`;
+}
+
+function algorithmRunCard(run) {
+  return `<article class="trace-card">
+    <span>#${run.id} · ${escapeHtml(run.run_mode)} · ${escapeHtml(run.status)} · version ${escapeHtml(run.version_id || "-")}</span>
+    <p><strong>算法输出</strong></p>
+    <pre>${escapeHtml(JSON.stringify(run.output_payload || {}, null, 2))}</pre>
+  </article>`;
 }
 
 function knowledgeSourceCard(source) {

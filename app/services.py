@@ -31,6 +31,9 @@ from app.models import (
     AdminSession,
     AdminSessionStatus,
     AdminUser,
+    AlgorithmDefinition,
+    AlgorithmRun,
+    AlgorithmVersion,
     AppApiKey,
     AppUser,
     AppKeyStatus,
@@ -419,6 +422,346 @@ def source_type_for_upload(filename: str, source_prefix: str) -> str:
     suffix = Path(filename).suffix.lower().lstrip(".") or "text"
     suffix = {"markdown": "md", "yml": "yaml"}.get(suffix, suffix)
     return f"{source_prefix}_{suffix}"
+
+
+def list_algorithms(session: Session) -> list[dict]:
+    algorithms = session.scalars(
+        select(AlgorithmDefinition)
+        .options(selectinload(AlgorithmDefinition.versions), selectinload(AlgorithmDefinition.runs))
+        .order_by(AlgorithmDefinition.updated_at.desc(), AlgorithmDefinition.id.desc())
+    ).all()
+    return [serialize_algorithm(algorithm) for algorithm in algorithms]
+
+
+def get_algorithm(session: Session, algorithm_id: int) -> dict | None:
+    algorithm = load_algorithm(session, algorithm_id)
+    if algorithm is None:
+        return None
+    return serialize_algorithm(algorithm)
+
+
+def create_algorithm(session: Session, payload: dict) -> dict:
+    slug = normalize_algorithm_slug(payload.get("slug") or f"algorithm-{uuid4().hex[:12]}")
+    name = str(payload.get("name") or "未命名算法").strip() or "未命名算法"
+    algorithm_type = str(payload.get("algorithm_type") or "rule_spec").strip() or "rule_spec"
+    if algorithm_type != "rule_spec":
+        raise ValueError("第一版算法库只支持 JSON rule_spec，不执行任意代码或远程脚本。")
+    if session.scalar(select(AlgorithmDefinition.id).where(AlgorithmDefinition.slug == slug)):
+        raise ValueError("算法 slug 已存在，请换一个唯一标识。")
+
+    spec = normalize_algorithm_spec(payload.get("spec") or {})
+    validate_algorithm_schema(payload.get("input_schema") or {}, "input_schema")
+    validate_algorithm_schema(payload.get("output_schema") or {}, "output_schema")
+
+    algorithm = AlgorithmDefinition(
+        slug=slug,
+        name=name,
+        domain=str(payload.get("domain") or "general").strip() or "general",
+        algorithm_type=algorithm_type,
+        status="draft",
+        description=str(payload.get("description") or "").strip(),
+        created_by=str(payload.get("operator") or payload.get("created_by") or "admin").strip() or "admin",
+    )
+    session.add(algorithm)
+    session.flush()
+
+    version = AlgorithmVersion(
+        algorithm_id=algorithm.id,
+        version=1,
+        status="draft",
+        spec=spec,
+        input_schema=payload.get("input_schema") or {},
+        output_schema=payload.get("output_schema") or {},
+        notes=str(payload.get("notes") or "").strip(),
+        created_by=algorithm.created_by,
+    )
+    session.add(version)
+    session.commit()
+    algorithm = load_algorithm(session, algorithm.id) or algorithm
+    return serialize_algorithm(algorithm)
+
+
+def upload_algorithm_files(session: Session, payload: dict) -> dict:
+    files = payload.get("files") or []
+    if not files:
+        raise ValueError("请至少选择一个算法 JSON 文件。")
+
+    algorithms: list[dict] = []
+    for index, file_payload in enumerate(files, start=1):
+        filename = safe_upload_filename(file_payload.get("filename") or f"algorithm-{index}.json")
+        suffix = Path(filename).suffix.lower()
+        if suffix != ".json":
+            raise ValueError("算法上传第一版只支持 JSON 配置文件，不执行 .py/.js/.sh 等任意代码。")
+        content = decode_upload_content(file_payload)
+        try:
+            data = json.loads(content.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"{filename} 不是合法 JSON 算法配置。") from exc
+        if not isinstance(data, dict):
+            raise ValueError(f"{filename} 根节点必须是 JSON object。")
+        algorithm_payload = data.get("algorithm") if isinstance(data.get("algorithm"), dict) else data
+        algorithms.append(create_algorithm(session, {**algorithm_payload, "operator": payload.get("operator") or "admin"}))
+
+    return {"uploaded": len(algorithms), "algorithms": algorithms}
+
+
+def publish_algorithm(session: Session, algorithm_id: int, payload: dict) -> dict | None:
+    algorithm = load_algorithm(session, algorithm_id)
+    if algorithm is None:
+        return None
+    version_id = nullable_int(payload.get("version_id"))
+    version = None
+    if version_id is not None:
+        version = next((item for item in algorithm.versions if item.id == version_id), None)
+    if version is None:
+        version = latest_algorithm_version(algorithm)
+    if version is None:
+        raise ValueError("算法还没有可发布版本。")
+
+    for item in algorithm.versions:
+        if item.status == "published" and item.id != version.id:
+            item.status = "archived"
+    version.status = "published"
+    version.published_at = utc_now()
+    algorithm.current_version_id = version.id
+    algorithm.status = "active"
+    algorithm.updated_at = utc_now()
+    session.commit()
+    session.refresh(algorithm)
+    record_audit_event(
+        session,
+        event_type="algorithm_published",
+        actor=str(payload.get("operator") or "admin").strip() or "admin",
+        target_type="algorithm",
+        target_id=str(algorithm.id),
+        severity="info",
+        status="published",
+        details={"algorithm_id": algorithm.id, "version_id": version.id, "slug": algorithm.slug},
+    )
+    algorithm = load_algorithm(session, algorithm.id) or algorithm
+    return serialize_algorithm(algorithm)
+
+
+def run_algorithm_test(session: Session, algorithm_id: int, payload: dict) -> dict | None:
+    return run_algorithm(session, algorithm_id, payload, run_mode="test", require_published=False)
+
+
+def execute_algorithm(session: Session, algorithm_id: int, payload: dict) -> dict | None:
+    return run_algorithm(session, algorithm_id, payload, run_mode="execute", require_published=True)
+
+
+def run_algorithm(session: Session, algorithm_id: int, payload: dict, run_mode: str, require_published: bool) -> dict | None:
+    algorithm = load_algorithm(session, algorithm_id)
+    if algorithm is None:
+        return None
+    version = select_algorithm_version(algorithm, payload, require_published=require_published)
+    if version is None:
+        raise ValueError("算法还没有发布版本，请先测试并发布。")
+    if require_published and version.status != "published":
+        raise ValueError("算法版本尚未发布，不能正式执行。")
+
+    run = AlgorithmRun(
+        algorithm_id=algorithm.id,
+        version_id=version.id,
+        run_mode=run_mode,
+        status="running",
+        input_payload=payload.get("input_payload") or payload.get("input") or {},
+        output_payload={},
+        created_by=str(payload.get("operator") or "admin").strip() or "admin",
+    )
+    session.add(run)
+    session.flush()
+
+    try:
+        if algorithm.algorithm_type != "rule_spec":
+            raise ValueError("当前只支持 rule_spec 算法执行。")
+        output = execute_rule_spec(version, run.input_payload)
+        run.output_payload = output
+        run.status = "ok"
+        run.completed_at = utc_now()
+        session.commit()
+        session.refresh(run)
+        return serialize_algorithm_run(run)
+    except ValueError as exc:
+        run.status = "failed"
+        run.error = str(exc)
+        run.completed_at = utc_now()
+        session.commit()
+        raise
+
+
+def execute_rule_spec(version: AlgorithmVersion, input_payload: dict) -> dict:
+    spec = version.spec or {}
+    input_payload = input_payload if isinstance(input_payload, dict) else {}
+    validate_required_fields(input_payload, version.input_schema or {}, "输入")
+    template = spec.get("output_template")
+    if not isinstance(template, dict):
+        raise ValueError("rule_spec 必须包含 output_template 对象。")
+    output = evaluate_rule_template(template, spec, input_payload)
+    if not isinstance(output, dict):
+        raise ValueError("算法输出必须是 JSON object。")
+    validate_required_fields(output, version.output_schema or {}, "输出")
+    return output
+
+
+def evaluate_rule_template(value, spec: dict, input_payload: dict):
+    if isinstance(value, dict):
+        return {key: evaluate_rule_template(item, spec, input_payload) for key, item in value.items()}
+    if isinstance(value, list):
+        return [evaluate_rule_template(item, spec, input_payload) for item in value]
+    if isinstance(value, str) and value.strip().startswith("{{") and value.strip().endswith("}}"):
+        expression = value.strip()[2:-2].strip()
+        return resolve_rule_expression(expression, spec, input_payload)
+    return value
+
+
+def resolve_rule_expression(expression: str, spec: dict, input_payload: dict):
+    if expression.startswith("input."):
+        return lookup_path(input_payload, expression.removeprefix("input."))
+    if expression.startswith("map."):
+        return resolve_rule_map_expression(expression, spec, input_payload)
+    raise ValueError(f"不支持的算法表达式：{expression}")
+
+
+def resolve_rule_map_expression(expression: str, spec: dict, input_payload: dict):
+    body = expression.removeprefix("map.")
+    bracket_index = body.find("[")
+    if bracket_index <= 0 or not body.endswith("]"):
+        raise ValueError(f"map 表达式格式不正确：{expression}")
+    map_name = body[:bracket_index]
+    key_expression = body[bracket_index + 1 : -1].strip()
+    maps = spec.get("maps") or {}
+    if not isinstance(maps, dict) or not isinstance(maps.get(map_name), dict):
+        raise ValueError(f"算法映射表不存在：{map_name}")
+    key = resolve_rule_expression(key_expression, spec, input_payload)
+    mapping = maps[map_name]
+    if str(key) not in mapping:
+        raise ValueError(f"算法映射表 {map_name} 缺少键：{key}")
+    return mapping[str(key)]
+
+
+def lookup_path(payload: dict, path: str):
+    current = payload
+    for part in path.split("."):
+        if not isinstance(current, dict) or part not in current:
+            raise ValueError(f"算法输入缺少字段：{path}")
+        current = current[part]
+    return current
+
+
+def validate_required_fields(payload: dict, schema: dict, label: str) -> None:
+    required = schema.get("required") if isinstance(schema, dict) else []
+    if not isinstance(required, list):
+        raise ValueError(f"{label} schema.required 必须是数组。")
+    missing = [str(key) for key in required if not isinstance(payload, dict) or str(key) not in payload]
+    if missing:
+        raise ValueError(f"{label}缺少必填字段：{', '.join(missing)}")
+
+
+def normalize_algorithm_slug(value: str) -> str:
+    slug = str(value or "").strip().lower().replace(" ", "-")
+    allowed = "abcdefghijklmnopqrstuvwxyz0123456789-_"
+    normalized = "".join(ch for ch in slug if ch in allowed)
+    return normalized or f"algorithm-{uuid4().hex[:12]}"
+
+
+def normalize_algorithm_spec(spec: dict) -> dict:
+    if not isinstance(spec, dict):
+        raise ValueError("spec 必须是 JSON object。")
+    if not isinstance(spec.get("output_template"), dict):
+        raise ValueError("spec.output_template 必须是 JSON object。")
+    return spec
+
+
+def validate_algorithm_schema(schema: dict, label: str) -> None:
+    if not isinstance(schema, dict):
+        raise ValueError(f"{label} 必须是 JSON object。")
+    required = schema.get("required", [])
+    if required is not None and not isinstance(required, list):
+        raise ValueError(f"{label}.required 必须是数组。")
+
+
+def load_algorithm(session: Session, algorithm_id: int) -> AlgorithmDefinition | None:
+    return session.scalar(
+        select(AlgorithmDefinition)
+        .where(AlgorithmDefinition.id == algorithm_id)
+        .options(selectinload(AlgorithmDefinition.versions), selectinload(AlgorithmDefinition.runs))
+    )
+
+
+def latest_algorithm_version(algorithm: AlgorithmDefinition) -> AlgorithmVersion | None:
+    versions = sorted(algorithm.versions or [], key=lambda item: (item.version, item.id), reverse=True)
+    return versions[0] if versions else None
+
+
+def active_algorithm_version(algorithm: AlgorithmDefinition) -> AlgorithmVersion | None:
+    if not algorithm.current_version_id:
+        return None
+    return next((version for version in algorithm.versions if version.id == algorithm.current_version_id), None)
+
+
+def select_algorithm_version(algorithm: AlgorithmDefinition, payload: dict, require_published: bool) -> AlgorithmVersion | None:
+    version_id = nullable_int(payload.get("version_id"))
+    if version_id is not None:
+        return next((version for version in algorithm.versions if version.id == version_id), None)
+    if require_published:
+        return active_algorithm_version(algorithm)
+    return latest_algorithm_version(algorithm)
+
+
+def serialize_algorithm(algorithm: AlgorithmDefinition) -> dict:
+    versions = sorted(algorithm.versions or [], key=lambda item: (item.version, item.id), reverse=True)
+    active_version = active_algorithm_version(algorithm)
+    return {
+        "id": algorithm.id,
+        "slug": algorithm.slug,
+        "name": algorithm.name,
+        "domain": algorithm.domain,
+        "algorithm_type": algorithm.algorithm_type,
+        "status": algorithm.status,
+        "description": algorithm.description,
+        "current_version_id": algorithm.current_version_id,
+        "active_version": serialize_algorithm_version(active_version) if active_version else None,
+        "versions": [serialize_algorithm_version(version) for version in versions],
+        "run_count": len(algorithm.runs or []),
+        "created_by": algorithm.created_by,
+        "created_at": algorithm.created_at.isoformat(),
+        "updated_at": algorithm.updated_at.isoformat(),
+    }
+
+
+def serialize_algorithm_version(version: AlgorithmVersion | None) -> dict | None:
+    if version is None:
+        return None
+    return {
+        "id": version.id,
+        "algorithm_id": version.algorithm_id,
+        "version": version.version,
+        "status": version.status,
+        "spec": version.spec,
+        "input_schema": version.input_schema,
+        "output_schema": version.output_schema,
+        "notes": version.notes,
+        "created_by": version.created_by,
+        "created_at": version.created_at.isoformat(),
+        "published_at": version.published_at.isoformat() if version.published_at else None,
+    }
+
+
+def serialize_algorithm_run(run: AlgorithmRun) -> dict:
+    return {
+        "id": run.id,
+        "algorithm_id": run.algorithm_id,
+        "version_id": run.version_id,
+        "run_mode": run.run_mode,
+        "status": run.status,
+        "input_payload": run.input_payload,
+        "output_payload": run.output_payload,
+        "error": run.error,
+        "created_by": run.created_by,
+        "created_at": run.created_at.isoformat(),
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+    }
 
 
 def merge_tags(*groups: list[str]) -> list[str]:

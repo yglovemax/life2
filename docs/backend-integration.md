@@ -235,6 +235,69 @@ POST /api/knowledge/cleanup-recommendations/execute
 
 每次批处理会写入 `knowledge_cleanup_executed` 审计事件；单条 merge 仍会写入 `knowledge_source_merged` 审计事件。
 
+## 算法库接口
+
+算法库和知识库分工不同：
+
+- 知识库保存解释材料、表达规则、案例和咨询话术，用于检索增强。
+- 算法库保存确定性计算规则，用于按用户输入输出结构化结果，再交给模块或聊天编排表达。
+
+第一版只执行安全 JSON `rule_spec`，不执行上传的 Python、JavaScript、Shell 或任意代码。
+
+接口：
+
+```http
+GET /api/algorithms
+POST /api/algorithms
+POST /api/algorithms/uploads
+GET /api/algorithms/{algorithm_id}
+POST /api/algorithms/{algorithm_id}/test-run
+POST /api/algorithms/{algorithm_id}/publish
+POST /api/algorithms/{algorithm_id}/execute
+```
+
+创建算法草稿：
+
+```json
+{
+  "slug": "bazi-day-master-score",
+  "name": "日主评分算法",
+  "domain": "bazi",
+  "algorithm_type": "rule_spec",
+  "spec": {
+    "output_template": {
+      "day_master": "{{input.day_master}}",
+      "score": "{{map.day_master_scores[input.day_master]}}",
+      "label": "{{map.labels[input.day_master]}}"
+    },
+    "maps": {
+      "day_master_scores": {"甲木": 82, "乙木": 76},
+      "labels": {"甲木": "主动开局", "乙木": "柔韧生长"}
+    }
+  },
+  "input_schema": {"required": ["day_master"]},
+  "output_schema": {"required": ["day_master", "score", "label"]}
+}
+```
+
+测试执行不要求发布：
+
+```json
+{
+  "input_payload": {"day_master": "甲木"},
+  "operator": "qa"
+}
+```
+
+发布后才能正式执行：
+
+```http
+POST /api/algorithms/{algorithm_id}/publish
+POST /api/algorithms/{algorithm_id}/execute
+```
+
+正式执行返回 `AlgorithmRun`，包含 `input_payload`、`output_payload`、`run_mode`、`status` 和版本 ID。前端或上游服务可先调用算法得到结构化结果，再把结果传入 `/api/app/modules/{module_slug}/render` 的 `input_payload`。
+
 知识片段创建后会自动生成本地 mock embedding 元数据，返回的 chunk 会包含：
 
 ```json
