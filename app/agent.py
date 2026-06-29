@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.models import ChatMessage
+from app.agent_tools import SYSTEM_TOOL_MAP, execute_agent_tools
 from app.services import (
     create_chat_session,
     generate_chat_reply,
@@ -54,16 +55,6 @@ PAGE_SYSTEM_MAP = {
     "daily-horoscope": "astrology",
     "bazi-birth-reading": "bazi",
     "bazi-daily-reading": "bazi",
-}
-
-SYSTEM_TOOL_MAP = {
-    "astrology": "astrology_birth_chart",
-    "bazi": "bazi_birth_chart",
-    "tarot": "tarot_reading",
-    "liuyao": "liuyao_reading",
-    "synastry": "relationship_synastry",
-    "oracle": "oracle_reading",
-    "hybrid_transit": "hybrid_transit_reading",
 }
 
 SYSTEM_KNOWLEDGE_TAGS = {
@@ -268,12 +259,10 @@ def generate_agent_reply(session: Session, session_id: int, payload: dict) -> di
         "entry_context": payload.get("entry_context") if isinstance(payload.get("entry_context"), dict) else agent_meta.get("entry_context") or {},
     }
     route = preview_agent_route(route_payload_input)
-    tool_calls = build_agent_tool_calls(route, payload)
     chat_payload = dict(payload)
     chat_payload["user_message_metadata"] = {
         **(payload.get("user_message_metadata") if isinstance(payload.get("user_message_metadata"), dict) else {}),
         "agent_route": route,
-        "agent_tool_calls": tool_calls,
     }
     if not chat_payload.get("knowledge_tags"):
         chat_payload["knowledge_tags"] = SYSTEM_KNOWLEDGE_TAGS.get(route["selected_system"], [])
@@ -284,6 +273,7 @@ def generate_agent_reply(session: Session, session_id: int, payload: dict) -> di
     if reply is None:
         return None
 
+    tool_calls = execute_agent_tools(route, payload, reply.get("context") or {})
     assistant_message_id = reply["assistant_message"]["id"]
     assistant_message = session.get(ChatMessage, assistant_message_id)
     if assistant_message is not None:
@@ -324,36 +314,6 @@ def generate_agent_reply(session: Session, session_id: int, payload: dict) -> di
             "provider": reply.get("meta", {}).get("provider") or {},
         },
     }
-
-
-def build_agent_tool_calls(route: dict, payload: dict) -> list[dict]:
-    selected_system = route.get("selected_system") or "astrology"
-    tool_name = SYSTEM_TOOL_MAP.get(selected_system, "astrology_birth_chart")
-    requires_birth = selected_system in {"astrology", "bazi", "synastry", "hybrid_transit"}
-    requires_relation = selected_system == "synastry"
-    placeholder = selected_system in {"tarot", "liuyao", "synastry", "oracle"}
-    return [
-        {
-            "tool_name": tool_name,
-            "system": selected_system,
-            "input_required": {
-                "content": bool(str(payload.get("content") or "").strip()),
-                "birth_profile": requires_birth,
-                "relation_profile": requires_relation,
-            },
-            "data_source": "existing_profile_or_v1_protocol" if placeholder else "existing_nexa_context",
-            "needs_birth_info": requires_birth,
-            "needs_relation_profile": requires_relation,
-            "needs_paid_access": False,
-            "result_summary": f"V1 使用{SYSTEM_LABELS.get(selected_system, selected_system)}工具协议生成结构化上下文。",
-            "raw_structured_result": {
-                "route": route,
-                "protocol_status": "placeholder" if placeholder else "connected_context",
-            },
-            "confidence_or_warnings": [] if not placeholder else ["V1 先返回工具协议占位，真实算法/抽牌服务后续接入。"],
-            "status": "ok",
-        }
-    ]
 
 
 def select_relevant_memory(context: dict, route: dict) -> list[dict]:

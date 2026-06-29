@@ -100,6 +100,7 @@ from app.agent import (
     generate_agent_reply,
     preview_agent_route,
 )
+from app.agent_tools import list_agent_tools
 
 
 def bootstrap() -> None:
@@ -472,6 +473,13 @@ def app_agent_route_preview(
     _: dict = Depends(require_app_token),
 ) -> dict:
     return preview_agent_route(payload)
+
+
+@app.get("/api/app/agent/tools")
+def app_agent_tools(
+    _: dict = Depends(require_app_token),
+) -> dict:
+    return {"items": list_agent_tools()}
 
 
 @app.post("/api/app/agent/sessions/{session_id}/reply")

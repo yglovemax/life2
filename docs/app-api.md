@@ -277,6 +277,37 @@ POST /api/app/agent/route-preview
 }
 ```
 
+### 工具注册表
+
+```http
+GET /api/app/agent/tools
+```
+
+返回所有 Agent 工具的只读注册信息：
+
+```json
+{
+  "items": [
+    {
+      "tool_name": "astrology_birth_chart",
+      "system": "astrology",
+      "requires_birth_profile": true,
+      "requires_relation_profile": false,
+      "requires_paid_access": false,
+      "provider_status": "connected_context"
+    },
+    {
+      "tool_name": "tarot_reading",
+      "system": "tarot",
+      "requires_birth_profile": false,
+      "requires_relation_profile": false,
+      "requires_paid_access": false,
+      "provider_status": "provider_placeholder"
+    }
+  ]
+}
+```
+
 ### Agent 回复
 
 ```http
@@ -306,8 +337,16 @@ POST /api/app/agent/sessions/{session_id}/reply
     {
       "tool_name": "tarot_reading",
       "system": "tarot",
-      "data_source": "existing_profile_or_v1_protocol",
-      "status": "ok"
+      "input_payload": {
+        "content": "他现在怎么想我？",
+        "entry_type": "free_question"
+      },
+      "output_payload": {
+        "protocol_status": "awaiting_provider"
+      },
+      "data_source": "v1_tool_protocol",
+      "status": "ok",
+      "error": ""
     }
   ],
   "messages": {
@@ -325,7 +364,14 @@ Phase A 已实现：
 - 推荐占术和当前入口不一致时返回 `quick_actions` 等待确认。
 - `tool_calls` 输出标准结构。
 
-Phase B/C 后续继续补：
+Phase B 已实现：
+
+- `GET /api/app/agent/tools` 工具注册表。
+- 占星、八字、hybrid 工具读取现有 `chart_snapshot`。
+- 塔罗、六爻、合盘、签文返回稳定 provider 占位协议，不编造真实抽牌、卦象或签文。
+- 合盘缺少关系对象资料时返回 `status=needs_input`、`error=relation_profile_required`。
+
+Phase C/D 后续继续补：
 
 - Agent 专用 SSE：`route/tool_call/delta/recommendations/memory/done`。
 - 真实塔罗、六爻、合盘、签文工具 provider。

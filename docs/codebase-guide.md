@@ -10,6 +10,7 @@
 app/
   main.py                 FastAPI 入口和 HTTP 路由
   agent.py                通用占卜 Agent V1 编排：占术路由、入口上下文、工具协议和 Agent 回复包装
+  agent_tools.py          Agent 工具注册表和工具执行边界：占星、八字、塔罗、六爻、合盘、签文等
   services.py             主要业务逻辑和编排
   models.py               SQLAlchemy 模型
   db.py                   数据库引擎、Session、schema 初始化、运行状态
@@ -65,7 +66,7 @@ tests/                    API、服务、平台底座测试
 - embedding：`build_text_embedding_payload`、`apply_text_embedding`、`create_embedding_rebuild_job`、`execute_embedding_rebuild_job`
 - App 用户和盘面：`create_or_update_app_user`、`save_birth_profile`、`get_user_chart`、`calculate_user_chart`
 - 聊天和记忆：`create_chat_session`、`generate_chat_reply`、`create_memory_item`、`execute_memory_summary_job`
-- Agent 编排：`app/agent.py` 复用聊天和记忆服务，负责占术路由、确认按钮、工具调用协议、推荐包装
+- Agent 编排：`app/agent.py` 复用聊天和记忆服务，负责占术路由、确认按钮、推荐包装；`app/agent_tools.py` 负责工具注册表、工具执行、`output_payload` 和 provider 状态
 - 安全：`login_admin`、`authenticate_admin_token`、`create_app_api_key`、`authenticate_app_token`
 - 模型 Key 和输出策略：`create_model_provider_key`、`revoke_model_provider_key`、`create_output_policy`、`preview_model_route`
 - 指标和审计：`metrics`、`cost_summary`、`list_audit_events`
@@ -158,7 +159,7 @@ tests/                    API、服务、平台底座测试
 ## 新增功能落点规则
 
 - 给 App 前端用的接口：放 `/api/app/*`，更新 `frontend-api-contract.md` 和 `app-api.md`。
-- Agent 相关接口：放 `/api/app/agent/*`，业务逻辑优先放 `app/agent.py`，不要把占术路由规则塞进旧聊天函数里。
+- Agent 相关接口：放 `/api/app/agent/*`，路由和会话逻辑优先放 `app/agent.py`，工具注册和工具执行放 `app/agent_tools.py`，不要把占术路由规则塞进旧聊天函数里。
 - 给后台管理用的接口：放对应管理分组，更新 `backend-integration.md`。
 - 新增长期运行任务：使用 `TaskEnvelope`，在 `worker.py` 注册 handler。
 - 新增配置：放 `app/core/settings.py`，文档写 README 和相关专题文档。

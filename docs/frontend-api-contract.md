@@ -399,6 +399,46 @@ Response：
 - 页面预设问题首轮不会自动切换占术。
 - 用户明确输入“只用八字/用塔罗/起六爻”等，会直接覆盖自动路由。
 
+### 工具注册表
+
+```http
+GET /api/app/agent/tools
+```
+
+Response：
+
+```json
+{
+  "items": [
+    {
+      "tool_name": "bazi_birth_chart",
+      "system": "bazi",
+      "requires_birth_profile": true,
+      "requires_relation_profile": false,
+      "requires_paid_access": false,
+      "provider_status": "connected_context",
+      "output_contract": {
+        "status": ["ok", "needs_input", "error"],
+        "required_fields": [
+          "tool_name",
+          "system",
+          "input_payload",
+          "output_payload",
+          "status",
+          "error",
+          "data_source"
+        ]
+      }
+    }
+  ]
+}
+```
+
+`provider_status`：
+
+- `connected_context`：当前已接现有 Nexa 结构化上下文，比如占星、八字、hybrid。
+- `provider_placeholder`：工具协议已稳定，但真实 provider 后续接入，比如塔罗、六爻、合盘、签文。
+
 ### Agent 回复
 
 ```http
@@ -442,11 +482,20 @@ Response：
     {
       "tool_name": "tarot_reading",
       "system": "tarot",
-      "data_source": "existing_profile_or_v1_protocol",
+      "input_payload": {
+        "content": "他现在怎么想我？",
+        "entry_type": "free_question",
+        "route_source": "auto_match"
+      },
+      "output_payload": {
+        "protocol_status": "awaiting_provider"
+      },
+      "data_source": "v1_tool_protocol",
       "needs_birth_info": false,
       "needs_relation_profile": false,
       "needs_paid_access": false,
-      "status": "ok"
+      "status": "ok",
+      "error": ""
     }
   ],
   "memory_used": [],
@@ -473,7 +522,13 @@ Response：
 - `oracle`
 - `hybrid_transit`
 
-V1 Phase A 说明：`tarot`、`liuyao`、`synastry`、`oracle` 先返回工具协议占位；真实抽牌、起卦、合盘算法后续接入时保持同一个 `tool_calls` 结构。
+`tool_calls.status`：
+
+- `ok`：工具调用协议已完成；如果 `output_payload.protocol_status=awaiting_provider`，表示真实 provider 尚未接入，但不会编造结果。
+- `needs_input`：需要用户补资料，例如合盘缺少对方资料时返回 `error=relation_profile_required`。
+- `error`：工具名未知或 provider 异常。
+
+占星、八字、hybrid 工具会从现有用户 `chart_snapshot` 读取结构化结果，并放入 `output_payload.chart_snapshot`。`tarot`、`liuyao`、`synastry`、`oracle` 当前先返回工具协议边界；真实抽牌、起卦、合盘算法后续接入时保持同一个 `tool_calls` 结构。
 
 ## 4. 聊天会话
 
