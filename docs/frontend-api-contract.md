@@ -472,7 +472,7 @@ Response：
 {
   "session_id": 10,
   "status": "ok",
-  "answer": "更适合先用塔罗看当下状态。",
+  "answer": "max，我先按这组三张牌看“他现在怎么想我？”。现状是「女祭司」...",
   "route": {
     "route_source": "auto_match",
     "selected_system": "tarot",
@@ -549,6 +549,13 @@ Response：
 - 六爻：`output_payload.hexagram`，包含 `upper_trigram`、`lower_trigram`、`lines`、`moving_lines`。
 - 签文：`output_payload.draw`，包含 `title`、`keyword`、`message`、`action`。
 - 合盘：`output_payload.compatibility`，包含 `score`、`level`、`dimensions`。
+
+回答编排规则：
+
+- 后端会先生成 `tool_calls`，再生成 `answer`。
+- `answer` 会优先基于 `tool_calls.output_payload` 组织话术。
+- 前端展示时可以直接显示 `answer`，也可以把 `tool_calls` 单独渲染成卡牌、卦象、签文或合盘组件。
+- 如果 `tool_calls.status=needs_input`，`answer` 会引导用户补资料。
 
 ### Agent SSE 流式回复
 

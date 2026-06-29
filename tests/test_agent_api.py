@@ -229,6 +229,25 @@ def test_agent_tarot_tool_returns_computed_card_spread():
     assert call["error"] == ""
 
 
+def test_agent_tarot_reply_uses_computed_cards_without_simulation():
+    user = create_agent_user()
+    agent_session = create_agent_session(user["id"], entry_type="free_question")
+
+    response = client.post(
+        f"/api/app/agent/sessions/{agent_session['id']}/reply",
+        headers=APP_HEADERS,
+        json={"content": "用塔罗看他现在怎么想我？"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    cards = data["tool_calls"][0]["output_payload"]["cards"]
+    assert cards[0]["name"] in data["answer"]
+    assert "现状" in data["answer"]
+    assert "阻力" in data["answer"]
+    assert "建议" in data["answer"]
+
+
 def test_agent_synastry_tool_requires_relation_profile():
     user = create_agent_user()
     agent_session = create_agent_session(user["id"], entry_type="free_question")
@@ -267,6 +286,24 @@ def test_agent_liuyao_tool_returns_computed_hexagram():
     assert len(call["output_payload"]["hexagram"]["lines"]) == 6
     assert call["output_payload"]["hexagram"]["name"]
     assert isinstance(call["output_payload"]["hexagram"]["moving_lines"], list)
+
+
+def test_agent_liuyao_reply_uses_computed_hexagram_without_simulation():
+    user = create_agent_user()
+    agent_session = create_agent_session(user["id"], entry_type="free_question")
+
+    response = client.post(
+        f"/api/app/agent/sessions/{agent_session['id']}/reply",
+        headers=APP_HEADERS,
+        json={"content": "用六爻看这个合作能不能成？"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    hexagram = data["tool_calls"][0]["output_payload"]["hexagram"]
+    assert hexagram["name"] in data["answer"]
+    assert "动爻" in data["answer"]
+    assert "合作" in data["answer"]
 
 
 def test_agent_oracle_tool_returns_computed_draw():

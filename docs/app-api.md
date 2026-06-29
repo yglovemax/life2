@@ -326,7 +326,7 @@ POST /api/app/agent/sessions/{session_id}/reply
 ```json
 {
   "status": "ok",
-  "answer": "更适合先用塔罗看当下状态。",
+  "answer": "max，我先按这组三张牌看“他现在怎么想我？”。现状是「女祭司」...",
   "route": {
     "route_source": "auto_match",
     "selected_system": "tarot",
@@ -380,6 +380,12 @@ Phase B 已实现：
 - 占星、八字、hybrid 工具读取现有 `chart_snapshot`。
 - 塔罗、六爻、签文和有资料的合盘返回本地结构化 provider 结果。
 - 合盘缺少关系对象资料时返回 `status=needs_input`、`error=relation_profile_required`。
+
+Phase F 已实现：
+
+- Agent 先执行路由对应工具，再生成最终回答。
+- `build_chat_model_request` 会把 `agent_tool_calls` 作为稳定结构注入模型请求。
+- 本地 mock 回答会读取 `tool_calls.output_payload`，塔罗/六爻/签文/合盘回答会引用工具结果。
 
 ### Agent SSE
 

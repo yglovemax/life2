@@ -3585,10 +3585,11 @@ def build_chat_model_request(context: dict, content: str, payload: dict) -> str:
         f"长期记忆摘要：{memory_summary.get('summary') or ''}",
         f"可检索记忆：{json.dumps(memory_items[:5], ensure_ascii=False)}",
         f"知识库命中：{json.dumps(context.get('knowledge_hits') or [], ensure_ascii=False)}",
+        f"占术工具结果：{json.dumps(payload.get('agent_tool_calls') or [], ensure_ascii=False)}",
         f"最近消息：{json.dumps(context.get('recent_messages') or [], ensure_ascii=False)}",
         "",
         f"用户本轮问题：{content}",
-        "请直接给出可发送给用户的中文回复。",
+        "请优先根据占术工具结果回答；如果工具结果为 needs_input，请先引导补充资料。请直接给出可发送给用户的中文回复。",
     ]
     return "\n".join(lines)
 
@@ -3600,12 +3601,17 @@ def resolve_chat_answer(model_request: str, context: dict, content: str, payload
         provider_result = call_chat_model_provider(model_request, payload)
         if provider_result.get("ok"):
             return provider_result.get("raw_text") or "", "live", provider_result.get("usage") or {}
-        answer = build_mock_chat_answer(context, content)
+        answer = build_mock_chat_answer(context, content, payload)
         return answer, "fallback", {"error": provider_result.get("error") or "", "fallback_reason": provider_result.get("fallback_reason") or ""}
-    return build_mock_chat_answer(context, content), "mock", {}
+    return build_mock_chat_answer(context, content, payload), "mock", {}
 
 
-def build_mock_chat_answer(context: dict, content: str) -> str:
+def build_mock_chat_answer(context: dict, content: str, payload: dict | None = None) -> str:
+    payload = payload or {}
+    tool_answer = build_tool_grounded_mock_answer(context, content, payload.get("agent_tool_calls") or [])
+    if tool_answer:
+        return tool_answer
+
     user = context.get("user") or {}
     nickname = user.get("nickname") or "你好"
     chart_snapshot = context.get("chart_snapshot") or {}
@@ -3638,6 +3644,117 @@ def build_mock_chat_answer(context: dict, content: str) -> str:
         f"{memory_hint}{knowledge_hint}今天先做一个小确认，比一次性把话说满更稳。"
         f"针对“{content}”，建议先问清对方期待，再决定投入多少资源。"
     )
+
+
+def build_tool_grounded_mock_answer(context: dict, content: str, tool_calls: list[dict]) -> str:
+    if not tool_calls:
+        return ""
+    primary = tool_calls[0]
+    if primary.get("status") == "needs_input":
+        return build_needs_input_answer(context, content, primary)
+    output = primary.get("output_payload") if isinstance(primary.get("output_payload"), dict) else {}
+    if output.get("protocol_status") != "computed":
+        return ""
+    tool_name = primary.get("tool_name")
+    if tool_name == "tarot_reading":
+        return build_tarot_answer(context, content, output)
+    if tool_name == "liuyao_reading":
+        return build_liuyao_answer(context, content, output)
+    if tool_name == "oracle_reading":
+        return build_oracle_answer(context, content, output)
+    if tool_name == "relationship_synastry":
+        return build_synastry_answer(context, content, output)
+    if tool_name in {"astrology_birth_chart", "bazi_birth_chart", "hybrid_transit_reading"}:
+        return build_chart_tool_answer(context, content, output, tool_name)
+    return ""
+
+
+def build_needs_input_answer(context: dict, content: str, tool_call: dict) -> str:
+    user = context.get("user") or {}
+    nickname = user.get("nickname") or "你好"
+    if tool_call.get("error") == "relation_profile_required":
+        return (
+            f"{nickname}，这个问题更适合用合盘看长期互动，但现在还缺对方资料。"
+            "你可以补充对方的出生日期、时间、城市；如果暂时没有，也可以先改用塔罗看当下互动状态。"
+        )
+    if tool_call.get("error") == "birth_profile_required":
+        return f"{nickname}，这个问题需要先补全本命资料，至少要有出生日期、时间和城市，我才能继续看。"
+    return f"{nickname}，这次工具还缺必要信息。你先补充资料，我再继续看“{content}”。"
+
+
+def build_tarot_answer(context: dict, content: str, output: dict) -> str:
+    user = context.get("user") or {}
+    nickname = user.get("nickname") or "你好"
+    cards = output.get("cards") if isinstance(output.get("cards"), list) else []
+    if len(cards) < 3:
+        return ""
+    current, obstacle, advice = cards[:3]
+    synthesis = output.get("synthesis") if isinstance(output.get("synthesis"), dict) else {}
+    return (
+        f"{nickname}，我先按这组三张牌看“{content}”。"
+        f"现状是「{current.get('name')}」，关键词是{'、'.join(current.get('keywords') or [])}，说明这件事现在的核心不是马上逼问答案，而是先看真实互动。"
+        f"阻力是「{obstacle.get('name')}」，它提醒你别被单一情绪带着走，要看对方有没有持续行动。"
+        f"建议是「{advice.get('name')}」：{advice.get('message')}"
+        f"整体看，{synthesis.get('summary') or '这组牌更适合先稳住节奏再行动。'}"
+    )
+
+
+def build_liuyao_answer(context: dict, content: str, output: dict) -> str:
+    user = context.get("user") or {}
+    nickname = user.get("nickname") or "你好"
+    hexagram = output.get("hexagram") if isinstance(output.get("hexagram"), dict) else {}
+    judgement = output.get("judgement") if isinstance(output.get("judgement"), dict) else {}
+    name = hexagram.get("name") or "本卦"
+    moving_lines = hexagram.get("moving_lines") or []
+    moving_text = "、".join(str(item) for item in moving_lines) if moving_lines else "无明显"
+    lower = (hexagram.get("lower_trigram") or {}).get("name") or ""
+    upper = (hexagram.get("upper_trigram") or {}).get("name") or ""
+    return (
+        f"{nickname}，这个合作问题我先按六爻结构看。当前卦象是「{name}」，上卦{upper}、下卦{lower}，动爻在第{moving_text}爻。"
+        f"这说明合作能不能成，不只看意愿，还要看条件是否落地。{judgement.get('summary') or '先看动爻，再定推进节奏。'}"
+        f"建议你先确认责任、时间和资源边界；如果这些基础条件还没定，先别急着承诺太满。"
+    )
+
+
+def build_oracle_answer(context: dict, content: str, output: dict) -> str:
+    user = context.get("user") or {}
+    nickname = user.get("nickname") or "你好"
+    draw = output.get("draw") if isinstance(output.get("draw"), dict) else {}
+    if not draw:
+        return ""
+    return (
+        f"{nickname}，今天给你的签文是「{draw.get('title')}」，关键词是「{draw.get('keyword')}」。"
+        f"{draw.get('message')} 今天的小行动：{draw.get('action')}"
+    )
+
+
+def build_synastry_answer(context: dict, content: str, output: dict) -> str:
+    user = context.get("user") or {}
+    nickname = user.get("nickname") or "你好"
+    compatibility = output.get("compatibility") if isinstance(output.get("compatibility"), dict) else {}
+    relation_profile = output.get("relation_profile") if isinstance(output.get("relation_profile"), dict) else {}
+    dimensions = compatibility.get("dimensions") if isinstance(compatibility.get("dimensions"), list) else []
+    strongest = max(dimensions, key=lambda item: item.get("score", 0), default={})
+    weakest = min(dimensions, key=lambda item: item.get("score", 0), default={})
+    return (
+        f"{nickname}，我先按你和{relation_profile.get('name') or '对方'}的关系资料看长期结构。"
+        f"当前合盘兼容分是 {compatibility.get('score')}，等级为 {compatibility.get('level')}。"
+        f"相对顺的维度是「{strongest.get('label')}」，需要留意的是「{weakest.get('label')}」。"
+        "这不代表关系被定死，而是提醒你们要把沟通节奏、情绪安全和现实支持分开看。"
+    )
+
+
+def build_chart_tool_answer(context: dict, content: str, output: dict, tool_name: str) -> str:
+    user = context.get("user") or {}
+    nickname = user.get("nickname") or "你好"
+    chart_snapshot = output.get("chart_snapshot") if isinstance(output.get("chart_snapshot"), dict) else {}
+    if tool_name == "bazi_birth_chart":
+        day_master = chart_snapshot.get("day_master") or "你的日主"
+        pillars = chart_snapshot.get("pillars") if isinstance(chart_snapshot.get("pillars"), dict) else {}
+        pillar_text = "/".join(filter(None, [pillars.get("year"), pillars.get("month"), pillars.get("day"), pillars.get("hour")]))
+        return f"{nickname}，我先按八字结构看“{content}”。你的日主是{day_master}，四柱参考为{pillar_text or '暂未完整'}，建议先稳住节奏，再看现实条件是否支持推进。"
+    sun_sign = chart_snapshot.get("sun_sign") or "你的太阳星座"
+    return f"{nickname}，我先按盘面结构看“{content}”。当前重点参考太阳{sun_sign}，建议用清晰、对等、可执行的方式推进，不要一次把话说满。"
 
 
 def call_chat_model_provider(model_request: str, payload: dict) -> dict:

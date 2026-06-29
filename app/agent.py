@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.models import ChatMessage
 from app.agent_tools import SYSTEM_TOOL_MAP, execute_agent_tools
 from app.services import (
+    build_chat_context,
     create_chat_session,
     generate_chat_reply,
     get_user_memory_settings,
@@ -276,11 +277,14 @@ def generate_agent_reply(session: Session, session_id: int, payload: dict) -> di
     if payload.get("memory_context_enabled") is False or personalization_enabled is False:
         chat_payload["memory_context_enabled"] = False
 
+    tool_context = build_chat_context(session, session_id, str(payload.get("content") or ""), chat_payload)
+    tool_calls = execute_agent_tools(route, payload, tool_context)
+    chat_payload["agent_tool_calls"] = tool_calls
+
     reply = generate_chat_reply(session, session_id, chat_payload)
     if reply is None:
         return None
 
-    tool_calls = execute_agent_tools(route, payload, reply.get("context") or {})
     assistant_message_id = reply["assistant_message"]["id"]
     assistant_message = session.get(ChatMessage, assistant_message_id)
     if assistant_message is not None:
