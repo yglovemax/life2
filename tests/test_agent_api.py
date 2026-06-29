@@ -57,7 +57,10 @@ def test_agent_tools_registry_lists_connected_and_placeholder_tools():
     by_name = {item["tool_name"]: item for item in items}
     assert by_name["astrology_birth_chart"]["provider_status"] == "connected_context"
     assert by_name["bazi_birth_chart"]["provider_status"] == "connected_context"
-    assert by_name["tarot_reading"]["provider_status"] == "provider_placeholder"
+    assert by_name["tarot_reading"]["provider_status"] == "local_provider"
+    assert by_name["liuyao_reading"]["provider_status"] == "local_provider"
+    assert by_name["oracle_reading"]["provider_status"] == "local_provider"
+    assert by_name["relationship_synastry"]["provider_status"] == "local_provider"
     assert by_name["relationship_synastry"]["requires_relation_profile"] is True
 
 
@@ -203,7 +206,7 @@ def test_agent_bazi_tool_uses_saved_chart_snapshot():
     assert call["output_payload"]["chart_snapshot"]["pillars"]["year"] == "己巳"
 
 
-def test_agent_tarot_tool_returns_provider_placeholder_state():
+def test_agent_tarot_tool_returns_computed_card_spread():
     user = create_agent_user()
     agent_session = create_agent_session(user["id"], entry_type="free_question")
 
@@ -216,8 +219,12 @@ def test_agent_tarot_tool_returns_provider_placeholder_state():
     assert response.status_code == 200
     call = response.json()["tool_calls"][0]
     assert call["tool_name"] == "tarot_reading"
-    assert call["data_source"] == "v1_tool_protocol"
-    assert call["output_payload"]["protocol_status"] == "awaiting_provider"
+    assert call["data_source"] == "local_tarot_provider_v1"
+    assert call["output_payload"]["protocol_status"] == "computed"
+    assert call["output_payload"]["provider"] == "local_tarot_provider_v1"
+    assert call["output_payload"]["spread_type"] == "three_card"
+    assert len(call["output_payload"]["cards"]) == 3
+    assert call["output_payload"]["cards"][0]["position"] == "现状"
     assert call["status"] == "ok"
     assert call["error"] == ""
 
@@ -239,6 +246,91 @@ def test_agent_synastry_tool_requires_relation_profile():
     assert call["error"] == "relation_profile_required"
     assert call["needs_relation_profile"] is True
     assert call["output_payload"]["protocol_status"] == "needs_relation_profile"
+
+
+def test_agent_liuyao_tool_returns_computed_hexagram():
+    user = create_agent_user()
+    agent_session = create_agent_session(user["id"], entry_type="free_question")
+
+    response = client.post(
+        f"/api/app/agent/sessions/{agent_session['id']}/reply",
+        headers=APP_HEADERS,
+        json={"content": "用六爻看这个合作能不能成？", "simulate_model_response": "先看成事条件。"},
+    )
+
+    assert response.status_code == 200
+    call = response.json()["tool_calls"][0]
+    assert call["tool_name"] == "liuyao_reading"
+    assert call["data_source"] == "local_liuyao_provider_v1"
+    assert call["output_payload"]["protocol_status"] == "computed"
+    assert call["output_payload"]["provider"] == "local_liuyao_provider_v1"
+    assert len(call["output_payload"]["hexagram"]["lines"]) == 6
+    assert call["output_payload"]["hexagram"]["name"]
+    assert isinstance(call["output_payload"]["hexagram"]["moving_lines"], list)
+
+
+def test_agent_oracle_tool_returns_computed_draw():
+    user = create_agent_user()
+    agent_session = create_agent_session(user["id"], entry_type="free_question")
+
+    response = client.post(
+        f"/api/app/agent/sessions/{agent_session['id']}/reply",
+        headers=APP_HEADERS,
+        json={"content": "给我一个今日签文提醒", "simulate_model_response": "给你一个轻量提醒。"},
+    )
+
+    assert response.status_code == 200
+    call = response.json()["tool_calls"][0]
+    assert call["tool_name"] == "oracle_reading"
+    assert call["data_source"] == "local_oracle_provider_v1"
+    assert call["output_payload"]["protocol_status"] == "computed"
+    assert call["output_payload"]["provider"] == "local_oracle_provider_v1"
+    assert call["output_payload"]["draw"]["title"]
+    assert call["output_payload"]["draw"]["action"]
+
+
+def test_agent_synastry_tool_returns_local_profile_analysis():
+    user = create_agent_user()
+    save_response = client.put(
+        f"/api/app/users/{user['id']}/birth-profile",
+        headers=APP_HEADERS,
+        json={
+            "nickname": "max",
+            "birth_date": "1989-09-29",
+            "birth_time": "16:00",
+            "birth_city": "兰州",
+            "birth_timezone": "Asia/Shanghai",
+            "chart_system": "astrology",
+        },
+    )
+    assert save_response.status_code == 200
+    agent_session = create_agent_session(user["id"], entry_type="free_question")
+
+    response = client.post(
+        f"/api/app/agent/sessions/{agent_session['id']}/reply",
+        headers=APP_HEADERS,
+        json={
+            "content": "用合盘看我们两个人长期合不合适",
+            "relation_profile": {
+                "name": "Ding",
+                "birth_date": "1992-03-08",
+                "birth_time": "09:30",
+                "birth_city": "上海",
+                "sun_sign": "双鱼座",
+            },
+            "simulate_model_response": "先看长期互动结构。",
+        },
+    )
+
+    assert response.status_code == 200
+    call = response.json()["tool_calls"][0]
+    assert call["tool_name"] == "relationship_synastry"
+    assert call["data_source"] == "local_synastry_provider_v1"
+    assert call["output_payload"]["protocol_status"] == "computed"
+    assert call["output_payload"]["provider"] == "local_synastry_provider_v1"
+    assert call["output_payload"]["relation_profile"]["name"] == "Ding"
+    assert 0 <= call["output_payload"]["compatibility"]["score"] <= 100
+    assert len(call["output_payload"]["compatibility"]["dimensions"]) == 4
 
 
 def test_agent_stream_emits_route_tool_delta_recommendations_memory_and_done_events():

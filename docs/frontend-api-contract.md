@@ -437,7 +437,8 @@ Response：
 `provider_status`：
 
 - `connected_context`：当前已接现有 Nexa 结构化上下文，比如占星、八字、hybrid。
-- `provider_placeholder`：工具协议已稳定，但真实 provider 后续接入，比如塔罗、六爻、合盘、签文。
+- `local_provider`：已接本地结构化 provider，比如塔罗、六爻、签文、合盘。
+- `provider_placeholder`：工具协议已稳定，但真实 provider 尚未接入的预留状态。
 
 ### Agent 回复
 
@@ -488,9 +489,20 @@ Response：
         "route_source": "auto_match"
       },
       "output_payload": {
-        "protocol_status": "awaiting_provider"
+        "protocol_status": "computed",
+        "provider": "local_tarot_provider_v1",
+        "spread_type": "three_card",
+        "cards": [
+          {
+            "position": "现状",
+            "name": "女祭司",
+            "orientation": "upright",
+            "keywords": ["直觉", "观察", "隐情"],
+            "message": "答案不适合催出来，先观察对方真实行动。"
+          }
+        ]
       },
-      "data_source": "v1_tool_protocol",
+      "data_source": "local_tarot_provider_v1",
       "needs_birth_info": false,
       "needs_relation_profile": false,
       "needs_paid_access": false,
@@ -524,11 +536,19 @@ Response：
 
 `tool_calls.status`：
 
-- `ok`：工具调用协议已完成；如果 `output_payload.protocol_status=awaiting_provider`，表示真实 provider 尚未接入，但不会编造结果。
+- `ok`：工具调用协议已完成；`output_payload.protocol_status=computed` 表示本轮已生成结构化工具结果。
+- `provided`：如果 `output_payload.protocol_status=provided`，表示使用了前端或上游传入的工具结果。
 - `needs_input`：需要用户补资料，例如合盘缺少对方资料时返回 `error=relation_profile_required`。
 - `error`：工具名未知或 provider 异常。
 
-占星、八字、hybrid 工具会从现有用户 `chart_snapshot` 读取结构化结果，并放入 `output_payload.chart_snapshot`。`tarot`、`liuyao`、`synastry`、`oracle` 当前先返回工具协议边界；真实抽牌、起卦、合盘算法后续接入时保持同一个 `tool_calls` 结构。
+占星、八字、hybrid 工具会从现有用户 `chart_snapshot` 读取结构化结果，并放入 `output_payload.chart_snapshot`。
+
+本地 provider 输出位置：
+
+- 塔罗：`output_payload.cards`，固定三张牌：现状、阻力、建议。
+- 六爻：`output_payload.hexagram`，包含 `upper_trigram`、`lower_trigram`、`lines`、`moving_lines`。
+- 签文：`output_payload.draw`，包含 `title`、`keyword`、`message`、`action`。
+- 合盘：`output_payload.compatibility`，包含 `score`、`level`、`dimensions`。
 
 ### Agent SSE 流式回复
 

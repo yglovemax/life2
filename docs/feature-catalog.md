@@ -65,7 +65,7 @@
 
 | 功能 | 状态 | 主要入口 | 说明 |
 | --- | --- | --- | --- |
-| 通用占卜 Agent V1 | partial | `/api/app/agent/*` | Phase A/B/C/D 已实现 Agent 会话、占术路由预览、入口上下文、确认按钮、回复包装、工具注册表、工具执行协议、Agent SSE、反馈和记忆控制；真实工具 provider 后续继续 |
+| 通用占卜 Agent V1 | partial | `/api/app/agent/*` | Phase A/B/C/D/E 已实现 Agent 会话、占术路由预览、入口上下文、确认按钮、回复包装、工具注册表、工具执行协议、Agent SSE、反馈、记忆控制和本地工具 provider；专业算法/外部 provider 后续替换 |
 | App Token 鉴权 | done | `/api/app/*` | 支持 Bearer 和 `X-Nexa-Api-Key` |
 | 用户创建/更新 | done | `POST /api/app/users` | `external_id` 幂等 |
 | 本命资料保存 | done | `PUT /api/app/users/{user_id}/birth-profile` | 支持占星、八字、hybrid |

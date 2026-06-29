@@ -302,7 +302,7 @@ GET /api/app/agent/tools
       "requires_birth_profile": false,
       "requires_relation_profile": false,
       "requires_paid_access": false,
-      "provider_status": "provider_placeholder"
+      "provider_status": "local_provider"
     }
   ]
 }
@@ -342,9 +342,19 @@ POST /api/app/agent/sessions/{session_id}/reply
         "entry_type": "free_question"
       },
       "output_payload": {
-        "protocol_status": "awaiting_provider"
+        "protocol_status": "computed",
+        "provider": "local_tarot_provider_v1",
+        "spread_type": "three_card",
+        "cards": [
+          {
+            "position": "现状",
+            "name": "女祭司",
+            "orientation": "upright",
+            "keywords": ["直觉", "观察", "隐情"]
+          }
+        ]
       },
-      "data_source": "v1_tool_protocol",
+      "data_source": "local_tarot_provider_v1",
       "status": "ok",
       "error": ""
     }
@@ -368,7 +378,7 @@ Phase B 已实现：
 
 - `GET /api/app/agent/tools` 工具注册表。
 - 占星、八字、hybrid 工具读取现有 `chart_snapshot`。
-- 塔罗、六爻、合盘、签文返回稳定 provider 占位协议，不编造真实抽牌、卦象或签文。
+- 塔罗、六爻、签文和有资料的合盘返回本地结构化 provider 结果。
 - 合盘缺少关系对象资料时返回 `status=needs_input`、`error=relation_profile_required`。
 
 ### Agent SSE
@@ -458,5 +468,5 @@ Phase D 已实现：
 
 Phase D 后续继续补：
 
-- 真实塔罗、六爻、合盘、签文工具 provider。
+- 专业塔罗、六爻、合盘、签文算法或外部服务替换本地 provider。
 - 更细粒度的向量相关性筛选。

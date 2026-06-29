@@ -111,7 +111,7 @@ def explicit_system_from_content(content: str) -> str:
         return "liuyao"
     if any(phrase in text for phrase in ["用合盘", "合盘看"]):
         return "synastry"
-    if any(phrase in text for phrase in ["用签文", "抽签", "神谕"]):
+    if any(phrase in text for phrase in ["用签文", "签文", "抽签", "神谕"]):
         return "oracle"
     return ""
 
@@ -128,7 +128,7 @@ def auto_match_system(content: str, entry_context: dict) -> tuple[str, str]:
         return "bazi", "这是长期趋势、事业财运或人生方向问题，更适合用八字看结构。"
     if any(keyword in text for keyword in ["性格", "自我认知", "心理模式", "关系模式"]):
         return "astrology", "这是自我认知或心理模式问题，更适合用占星看人格结构。"
-    if any(keyword in text for keyword in ["今日提醒", "快速指引", "安抚", "一句话"]):
+    if any(keyword in text for keyword in ["今日提醒", "快速指引", "安抚", "一句话", "签文", "神谕"]):
         return "oracle", "这是轻量提醒和方向感问题，适合用签文快速收束。"
     if any(keyword in text for keyword in ["最近", "近期", "不顺", "运势", "波动", "行运"]):
         entry_system = entry_system_from_context(entry_context)
