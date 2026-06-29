@@ -99,6 +99,7 @@ from app.agent import (
     create_agent_session,
     generate_agent_reply,
     preview_agent_route,
+    stream_agent_reply_events,
 )
 from app.agent_tools import list_agent_tools
 
@@ -498,6 +499,39 @@ def app_agent_session_reply(
     if reply is None:
         raise HTTPException(status_code=404, detail="agent session not found")
     return reply
+
+
+@app.get("/api/app/agent/sessions/{session_id}/stream")
+def app_agent_session_stream(
+    session_id: int,
+    content: str,
+    simulate_model_response: str | None = None,
+    memory_run_mode: str | None = None,
+    selected_system: str | None = None,
+    confirmed_system: str | None = None,
+    memory_enabled: bool | None = None,
+    auth: dict = Depends(require_app_stream_token),
+    session: Session = Depends(get_session),
+) -> StreamingResponse:
+    headers = enforce_app_chat_rate_limit(auth, session_id)
+    payload: dict = {"content": content}
+    if simulate_model_response is not None:
+        payload["simulate_model_response"] = simulate_model_response
+    if memory_run_mode is not None:
+        payload["memory_run_mode"] = memory_run_mode
+    if selected_system is not None:
+        payload["selected_system"] = selected_system
+    if confirmed_system is not None:
+        payload["confirmed_route"] = {"selected_system": confirmed_system}
+    if memory_enabled is not None:
+        payload["memory_enabled"] = memory_enabled
+    try:
+        reply = generate_agent_reply(session, session_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if reply is None:
+        raise HTTPException(status_code=404, detail="agent session not found")
+    return StreamingResponse(stream_agent_reply_events(reply), media_type="text/event-stream", headers=headers)
 
 
 @app.get("/api/app/chat/sessions/{session_id}/stream")

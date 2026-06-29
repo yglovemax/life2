@@ -239,3 +239,48 @@ def test_agent_synastry_tool_requires_relation_profile():
     assert call["error"] == "relation_profile_required"
     assert call["needs_relation_profile"] is True
     assert call["output_payload"]["protocol_status"] == "needs_relation_profile"
+
+
+def test_agent_stream_emits_route_tool_delta_recommendations_memory_and_done_events():
+    user = create_agent_user()
+    agent_session = create_agent_session(user["id"], entry_type="free_question")
+
+    with client.stream(
+        "GET",
+        f"/api/app/agent/sessions/{agent_session['id']}/stream",
+        headers=APP_HEADERS,
+        params={"content": "用塔罗看他现在怎么想我？", "simulate_model_response": "先看当下互动。"},
+    ) as response:
+        assert response.status_code == 200
+        body = response.read().decode("utf-8")
+
+    assert "event: route" in body
+    assert "event: tool_call" in body
+    assert "event: delta" in body
+    assert "event: recommendations" in body
+    assert "event: memory" in body
+    assert "event: done" in body
+    assert "tarot_reading" in body
+    assert "先看当下互动" in body
+
+
+def test_agent_stream_accepts_query_api_key_and_confirmed_system():
+    user = create_agent_user()
+    agent_session = create_agent_session(user["id"], entry_type="free_question")
+
+    with client.stream(
+        "GET",
+        f"/api/app/agent/sessions/{agent_session['id']}/stream",
+        params={
+            "api_key": "dev-app-token",
+            "content": "那就用六爻看",
+            "confirmed_system": "liuyao",
+            "simulate_model_response": "先按六爻判断这件事。",
+        },
+    ) as response:
+        assert response.status_code == 200
+        body = response.read().decode("utf-8")
+
+    assert '"selected_system": "liuyao"' in body
+    assert "liuyao_reading" in body
+    assert "先按六爻判断这件事" in body

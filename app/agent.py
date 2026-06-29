@@ -9,6 +9,7 @@ from app.services import (
     generate_chat_reply,
     load_chat_session_model,
     normalize_tags,
+    sse_event,
 )
 
 
@@ -314,6 +315,27 @@ def generate_agent_reply(session: Session, session_id: int, payload: dict) -> di
             "provider": reply.get("meta", {}).get("provider") or {},
         },
     }
+
+
+def stream_agent_reply_events(reply: dict):
+    yield sse_event("route", reply.get("route") or {})
+    for tool_call in reply.get("tool_calls") or []:
+        yield sse_event("tool_call", tool_call)
+    answer = reply.get("answer") or ""
+    chunk_size = 12
+    for start in range(0, len(answer), chunk_size):
+        yield sse_event("delta", {"text": answer[start : start + chunk_size]})
+    yield sse_event("recommendations", {"items": reply.get("recommendations") or []})
+    yield sse_event("memory", reply.get("memory_updates") or {"created_count": 0, "items": [], "summary": None})
+    yield sse_event(
+        "done",
+        {
+            "session_id": reply.get("session_id"),
+            "status": reply.get("status"),
+            "messages": reply.get("messages") or {},
+            "answer": answer,
+        },
+    )
 
 
 def select_relevant_memory(context: dict, route: dict) -> list[dict]:

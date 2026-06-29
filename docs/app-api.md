@@ -371,9 +371,43 @@ Phase B 已实现：
 - 塔罗、六爻、合盘、签文返回稳定 provider 占位协议，不编造真实抽牌、卦象或签文。
 - 合盘缺少关系对象资料时返回 `status=needs_input`、`error=relation_profile_required`。
 
-Phase C/D 后续继续补：
+### Agent SSE
 
-- Agent 专用 SSE：`route/tool_call/delta/recommendations/memory/done`。
+```http
+GET /api/app/agent/sessions/{session_id}/stream?content=<urlencoded_message>
+```
+
+事件顺序固定为：
+
+```text
+route
+tool_call
+delta
+recommendations
+memory
+done
+```
+
+`EventSource` 场景可用 query token：
+
+```text
+GET /api/app/agent/sessions/10/stream?api_key=dev-app-token&content=...
+```
+
+用户点击确认按钮后，可传：
+
+```text
+confirmed_system=liuyao
+```
+
+Phase C 已实现：
+
+- Agent 专用 SSE。
+- 支持 header 鉴权和 `api_key` query 鉴权。
+- SSE 支持 `confirmed_system` 快捷确认参数。
+
+Phase D 后续继续补：
+
 - 真实塔罗、六爻、合盘、签文工具 provider。
 - Agent feedback API。
 - 记忆开关、删除和更细粒度相关性筛选。

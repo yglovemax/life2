@@ -530,6 +530,91 @@ Response：
 
 占星、八字、hybrid 工具会从现有用户 `chart_snapshot` 读取结构化结果，并放入 `output_payload.chart_snapshot`。`tarot`、`liuyao`、`synastry`、`oracle` 当前先返回工具协议边界；真实抽牌、起卦、合盘算法后续接入时保持同一个 `tool_calls` 结构。
 
+### Agent SSE 流式回复
+
+```http
+GET /api/app/agent/sessions/{session_id}/stream?content=<urlencoded_message>
+```
+
+支持 query 参数：
+
+- `content`：必填，用户消息。
+- `simulate_model_response`：可选，联调用。
+- `memory_run_mode`：可选，`sync` 或 `queued`。
+- `selected_system`：可选，用户显式选择占术。
+- `confirmed_system`：可选，用户点击确认按钮后的占术，例如 `liuyao`。
+- `memory_enabled`：可选，`false` 时本轮不抽取记忆。
+- `api_key`：可选，仅给原生 `EventSource` 使用。
+
+事件顺序：
+
+```text
+route
+tool_call
+delta
+recommendations
+memory
+done
+```
+
+示例：
+
+```js
+const url =
+  `/api/app/agent/sessions/${sessionId}/stream` +
+  `?content=${encodeURIComponent(message)}` +
+  `&api_key=${encodeURIComponent(appApiKey)}`;
+
+const events = new EventSource(url);
+
+events.addEventListener("route", (event) => {
+  const route = JSON.parse(event.data);
+  renderRoute(route);
+});
+
+events.addEventListener("tool_call", (event) => {
+  const toolCall = JSON.parse(event.data);
+  renderToolCall(toolCall);
+});
+
+events.addEventListener("delta", (event) => {
+  const { text } = JSON.parse(event.data);
+  appendAgentText(text);
+});
+
+events.addEventListener("recommendations", (event) => {
+  const { items } = JSON.parse(event.data);
+  renderRecommendations(items);
+});
+
+events.addEventListener("memory", (event) => {
+  const memoryUpdates = JSON.parse(event.data);
+  updateMemoryState(memoryUpdates);
+});
+
+events.addEventListener("done", (event) => {
+  const done = JSON.parse(event.data);
+  finalizeAgentMessage(done.messages);
+  events.close();
+});
+```
+
+用户点击确认按钮后，前端可以这样传：
+
+```text
+confirmed_system=liuyao
+```
+
+后端会等价转换为：
+
+```json
+{
+  "confirmed_route": {
+    "selected_system": "liuyao"
+  }
+}
+```
+
 ## 4. 聊天会话
 
 ### 创建聊天会话
