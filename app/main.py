@@ -30,6 +30,7 @@ from app.services import (
     create_or_update_app_user,
     create_output_policy,
     create_training_run,
+    delete_memory_item,
     delete_knowledge_source,
     execute_knowledge_cleanup_recommendations,
     execute_algorithm,
@@ -40,6 +41,7 @@ from app.services import (
     get_chat_session,
     get_module_detail,
     get_training_run,
+    get_user_memory_settings,
     build_training_quality_report,
     get_user_chart,
     knowledge_taxonomy,
@@ -68,6 +70,7 @@ from app.services import (
     publish_module,
     publish_training_run,
     preview_model_route,
+    record_agent_message_feedback,
     record_audit_event,
     retry_training_run,
     rollback_module,
@@ -90,6 +93,7 @@ from app.services import (
     update_issue,
     update_knowledge_source_status,
     upsert_memory_summary,
+    update_user_memory_settings,
     upload_knowledge_files,
     publish_algorithm,
     run_algorithm_test,
@@ -534,6 +538,22 @@ def app_agent_session_stream(
     return StreamingResponse(stream_agent_reply_events(reply), media_type="text/event-stream", headers=headers)
 
 
+@app.post("/api/app/agent/messages/{message_id}/feedback")
+def app_agent_message_feedback(
+    message_id: int,
+    payload: dict,
+    _: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    try:
+        feedback = record_agent_message_feedback(session, message_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if feedback is None:
+        raise HTTPException(status_code=404, detail="agent message not found")
+    return feedback
+
+
 @app.get("/api/app/chat/sessions/{session_id}/stream")
 def app_chat_session_stream(
     session_id: int,
@@ -587,6 +607,19 @@ def app_user_memory_create(
     return item
 
 
+@app.delete("/api/app/users/{user_id}/memories/{memory_id}")
+def app_user_memory_delete(
+    user_id: int,
+    memory_id: int,
+    _: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    item = delete_memory_item(session, user_id, memory_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="memory item not found")
+    return item
+
+
 @app.get("/api/app/users/{user_id}/memories")
 def app_user_memories(
     user_id: int,
@@ -597,6 +630,31 @@ def app_user_memories(
     if memories is None:
         raise HTTPException(status_code=404, detail="app user not found")
     return memories
+
+
+@app.get("/api/app/users/{user_id}/memory-settings")
+def app_user_memory_settings(
+    user_id: int,
+    _: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    settings = get_user_memory_settings(session, user_id)
+    if settings is None:
+        raise HTTPException(status_code=404, detail="app user not found")
+    return settings
+
+
+@app.put("/api/app/users/{user_id}/memory-settings")
+def app_user_memory_settings_update(
+    user_id: int,
+    payload: dict,
+    _: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    settings = update_user_memory_settings(session, user_id, payload)
+    if settings is None:
+        raise HTTPException(status_code=404, detail="app user not found")
+    return settings
 
 
 @app.get("/api/modules")

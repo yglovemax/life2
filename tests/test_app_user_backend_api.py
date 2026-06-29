@@ -327,3 +327,54 @@ def test_memory_item_stores_embedding_metadata():
     assert item["embedding"]["model"] == "text-embedding-3-small"
     assert item["embedding"]["dimensions"] == 1536
     assert item["embedding"]["hash"]
+
+
+def test_memory_item_can_be_deleted_for_user():
+    user = create_user()
+    item_response = client.post(
+        f"/api/app/users/{user['id']}/memories",
+        headers=APP_HEADERS,
+        json={
+            "memory_type": "preference",
+            "content": "用户不希望再记住这条内容。",
+            "tags": ["删除测试"],
+            "importance": 3,
+        },
+    )
+    assert item_response.status_code == 200
+    memory_id = item_response.json()["id"]
+
+    delete_response = client.delete(f"/api/app/users/{user['id']}/memories/{memory_id}", headers=APP_HEADERS)
+
+    assert delete_response.status_code == 200
+    deleted = delete_response.json()
+    assert deleted["id"] == memory_id
+    assert deleted["status"] == "deleted"
+
+    list_response = client.get(f"/api/app/users/{user['id']}/memories", headers=APP_HEADERS)
+    assert list_response.status_code == 200
+    assert all(item["id"] != memory_id for item in list_response.json()["items"])
+
+
+def test_memory_settings_can_be_updated_and_read():
+    user = create_user()
+
+    update_response = client.put(
+        f"/api/app/users/{user['id']}/memory-settings",
+        headers=APP_HEADERS,
+        json={
+            "memory_enabled": False,
+            "personalization_enabled": False,
+            "retention_days": 30,
+        },
+    )
+    get_response = client.get(f"/api/app/users/{user['id']}/memory-settings", headers=APP_HEADERS)
+
+    assert update_response.status_code == 200
+    assert get_response.status_code == 200
+    settings = get_response.json()
+    assert settings["user_id"] == user["id"]
+    assert settings["memory_enabled"] is False
+    assert settings["personalization_enabled"] is False
+    assert settings["retention_days"] == 30
+    assert settings["updated_at"]

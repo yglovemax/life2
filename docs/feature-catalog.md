@@ -65,7 +65,7 @@
 
 | 功能 | 状态 | 主要入口 | 说明 |
 | --- | --- | --- | --- |
-| 通用占卜 Agent V1 | partial | `/api/app/agent/*` | Phase A/B/C 已实现 Agent 会话、占术路由预览、入口上下文、确认按钮、回复包装、工具注册表、工具执行协议和 Agent SSE；反馈、真实工具 provider 后续继续 |
+| 通用占卜 Agent V1 | partial | `/api/app/agent/*` | Phase A/B/C/D 已实现 Agent 会话、占术路由预览、入口上下文、确认按钮、回复包装、工具注册表、工具执行协议、Agent SSE、反馈和记忆控制；真实工具 provider 后续继续 |
 | App Token 鉴权 | done | `/api/app/*` | 支持 Bearer 和 `X-Nexa-Api-Key` |
 | 用户创建/更新 | done | `POST /api/app/users` | `external_id` 幂等 |
 | 本命资料保存 | done | `PUT /api/app/users/{user_id}/birth-profile` | 支持占星、八字、hybrid |
@@ -86,6 +86,8 @@
 | 记忆摘要写入 | done | `PUT /api/app/users/{user_id}/memory-summary` | 可手动更新 |
 | 记忆条目写入 | done | `POST /api/app/users/{user_id}/memories` | 创建时写 embedding |
 | 用户记忆查询 | done | `GET /api/app/users/{user_id}/memories` | 返回摘要和条目 |
+| 用户记忆删除 | done | `DELETE /api/app/users/{user_id}/memories/{memory_id}` | 软删除，列表只返回 active |
+| 用户记忆设置 | done | `GET/PUT /api/app/users/{user_id}/memory-settings` | 控制记忆沉淀与个性化使用 |
 | 自动记忆抽取 | done | 聊天 reply/stream | 从用户话术和回答中抽取偏好/关系等 |
 | 记忆摘要异步 | done | `memory.summarize` | worker 任务 |
 | 大规模用户记忆策略 | partial | 文档已定 | 仍需接 Postgres/pgvector、缓存、分片策略 |

@@ -406,8 +406,57 @@ Phase C 已实现：
 - 支持 header 鉴权和 `api_key` query 鉴权。
 - SSE 支持 `confirmed_system` 快捷确认参数。
 
+### Agent 反馈
+
+```http
+POST /api/app/agent/messages/{message_id}/feedback
+```
+
+Request：
+
+```json
+{
+  "feedback_type": "like",
+  "target_type": "recommendation",
+  "target_id": "tarot_reading",
+  "metadata": {
+    "clicked_recommendation": "tarot_reading"
+  }
+}
+```
+
+Response 会回填 `user_id`、`session_id`、`message_id`，用于后续统计每个模型、占术路由和推荐位的效果。
+
+### Agent 记忆控制
+
+```http
+GET /api/app/users/{user_id}/memory-settings
+PUT /api/app/users/{user_id}/memory-settings
+DELETE /api/app/users/{user_id}/memories/{memory_id}
+```
+
+`PUT /memory-settings` Request：
+
+```json
+{
+  "memory_enabled": false,
+  "personalization_enabled": false,
+  "retention_days": 30
+}
+```
+
+- `memory_enabled=false`：Agent 回复时不再沉淀新记忆。
+- `personalization_enabled=false`：Agent 回复时不把长期记忆放入本轮上下文，`memory_used=[]`。
+- 删除记忆为软删除，列表接口只返回 `active` 条目。
+
+Phase D 已实现：
+
+- Agent message feedback API。
+- 用户记忆条目删除。
+- 用户记忆设置读写。
+- Agent 回复尊重 `memory_enabled` 与 `personalization_enabled`。
+
 Phase D 后续继续补：
 
 - 真实塔罗、六爻、合盘、签文工具 provider。
-- Agent feedback API。
-- 记忆开关、删除和更细粒度相关性筛选。
+- 更细粒度的向量相关性筛选。

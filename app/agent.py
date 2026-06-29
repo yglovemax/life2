@@ -7,6 +7,7 @@ from app.agent_tools import SYSTEM_TOOL_MAP, execute_agent_tools
 from app.services import (
     create_chat_session,
     generate_chat_reply,
+    get_user_memory_settings,
     load_chat_session_model,
     normalize_tags,
     sse_event,
@@ -267,8 +268,13 @@ def generate_agent_reply(session: Session, session_id: int, payload: dict) -> di
     }
     if not chat_payload.get("knowledge_tags"):
         chat_payload["knowledge_tags"] = SYSTEM_KNOWLEDGE_TAGS.get(route["selected_system"], [])
-    if payload.get("memory_enabled") is False:
+    memory_settings = get_user_memory_settings(session, chat_session.user_id) or {}
+    memory_enabled = memory_settings.get("memory_enabled", True)
+    personalization_enabled = memory_settings.get("personalization_enabled", True)
+    if payload.get("memory_enabled") is False or memory_enabled is False:
         chat_payload["memory_extraction"] = False
+    if payload.get("memory_context_enabled") is False or personalization_enabled is False:
+        chat_payload["memory_context_enabled"] = False
 
     reply = generate_chat_reply(session, session_id, chat_payload)
     if reply is None:
@@ -302,7 +308,7 @@ def generate_agent_reply(session: Session, session_id: int, payload: dict) -> di
         "answer": reply["answer"],
         "route": route,
         "tool_calls": tool_calls,
-        "memory_used": select_relevant_memory(reply.get("context") or {}, route),
+        "memory_used": [] if chat_payload.get("memory_context_enabled") is False else select_relevant_memory(reply.get("context") or {}, route),
         "recommendations": build_agent_recommendations(route),
         "messages": {
             "user_message_id": reply["user_message"]["id"],

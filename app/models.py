@@ -424,6 +424,24 @@ class ChatMessage(Base):
     user: Mapped[AppUser] = relationship()
 
 
+class AgentFeedback(Base):
+    __tablename__ = "agent_feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("app_users.id"), index=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("chat_sessions.id"), index=True)
+    message_id: Mapped[int] = mapped_column(ForeignKey("chat_messages.id"), index=True)
+    feedback_type: Mapped[str] = mapped_column(String(80), index=True)
+    target_type: Mapped[str] = mapped_column(String(80), default="message")
+    target_id: Mapped[str] = mapped_column(String(160), default="")
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    user: Mapped[AppUser] = relationship()
+    session: Mapped[ChatSession] = relationship()
+    message: Mapped[ChatMessage] = relationship()
+
+
 class UserMemorySummary(Base):
     __tablename__ = "user_memory_summaries"
 

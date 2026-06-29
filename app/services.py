@@ -31,6 +31,7 @@ from app.models import (
     AdminSession,
     AdminSessionStatus,
     AdminUser,
+    AgentFeedback,
     AlgorithmDefinition,
     AlgorithmRun,
     AlgorithmVersion,
@@ -3141,6 +3142,116 @@ def list_user_memories(session: Session, user_id: int) -> dict | None:
     }
 
 
+def delete_memory_item(session: Session, user_id: int, memory_id: int) -> dict | None:
+    item = session.scalar(
+        select(MemoryItem).where(
+            MemoryItem.id == memory_id,
+            MemoryItem.user_id == user_id,
+            MemoryItem.status == "active",
+        )
+    )
+    if item is None:
+        return None
+    item.status = "deleted"
+    item.updated_at = utc_now()
+    session.commit()
+    session.refresh(item)
+    return serialize_memory_item(item)
+
+
+DEFAULT_MEMORY_SETTINGS = {
+    "memory_enabled": True,
+    "personalization_enabled": True,
+    "retention_days": None,
+}
+
+
+def coerce_bool_setting(value, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def memory_settings_from_profile(user: AppUser) -> dict:
+    profile = user.profile if isinstance(user.profile, dict) else {}
+    raw = profile.get("memory_settings") if isinstance(profile.get("memory_settings"), dict) else {}
+    retention_days = raw.get("retention_days")
+    if retention_days is not None:
+        retention_days = clamp_int(retention_days, 1, 3650, 365)
+    return {
+        "user_id": user.id,
+        "memory_enabled": coerce_bool_setting(raw.get("memory_enabled"), DEFAULT_MEMORY_SETTINGS["memory_enabled"]),
+        "personalization_enabled": coerce_bool_setting(
+            raw.get("personalization_enabled"),
+            DEFAULT_MEMORY_SETTINGS["personalization_enabled"],
+        ),
+        "retention_days": retention_days,
+        "updated_at": raw.get("updated_at") or user.updated_at.isoformat(),
+    }
+
+
+def get_user_memory_settings(session: Session, user_id: int) -> dict | None:
+    user = session.get(AppUser, user_id)
+    if user is None:
+        return None
+    return memory_settings_from_profile(user)
+
+
+def update_user_memory_settings(session: Session, user_id: int, payload: dict) -> dict | None:
+    user = session.get(AppUser, user_id)
+    if user is None:
+        return None
+    current = memory_settings_from_profile(user)
+    retention_days = payload.get("retention_days", current.get("retention_days"))
+    if retention_days is not None:
+        retention_days = clamp_int(retention_days, 1, 3650, 365)
+    updated_settings = {
+        "memory_enabled": coerce_bool_setting(payload.get("memory_enabled"), current["memory_enabled"]),
+        "personalization_enabled": coerce_bool_setting(
+            payload.get("personalization_enabled"),
+            current["personalization_enabled"],
+        ),
+        "retention_days": retention_days,
+        "updated_at": utc_now().isoformat(),
+    }
+    profile = dict(user.profile or {})
+    profile["memory_settings"] = updated_settings
+    user.profile = profile
+    user.updated_at = utc_now()
+    session.commit()
+    session.refresh(user)
+    return memory_settings_from_profile(user)
+
+
+def record_agent_message_feedback(session: Session, message_id: int, payload: dict) -> dict | None:
+    message = session.get(ChatMessage, message_id)
+    if message is None:
+        return None
+    feedback_type = str(payload.get("feedback_type") or "").strip()
+    if not feedback_type:
+        raise ValueError("feedback_type is required")
+    feedback = AgentFeedback(
+        user_id=message.user_id,
+        session_id=message.session_id,
+        message_id=message.id,
+        feedback_type=compact_text(feedback_type, 80),
+        target_type=compact_text(str(payload.get("target_type") or "message"), 80),
+        target_id=compact_text(str(payload.get("target_id") or ""), 160),
+        metadata_json=payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {},
+    )
+    session.add(feedback)
+    session.commit()
+    session.refresh(feedback)
+    return serialize_agent_feedback(feedback)
+
+
 def serialize_app_user(user: AppUser) -> dict:
     return {
         "id": user.id,
@@ -3230,6 +3341,20 @@ def serialize_memory_item(item: MemoryItem) -> dict:
         "embedding": serialize_embedding_meta(item),
         "created_at": item.created_at.isoformat(),
         "updated_at": item.updated_at.isoformat(),
+    }
+
+
+def serialize_agent_feedback(feedback: AgentFeedback) -> dict:
+    return {
+        "id": feedback.id,
+        "user_id": feedback.user_id,
+        "session_id": feedback.session_id,
+        "message_id": feedback.message_id,
+        "feedback_type": feedback.feedback_type,
+        "target_type": feedback.target_type,
+        "target_id": feedback.target_id,
+        "metadata": feedback.metadata_json or {},
+        "created_at": feedback.created_at.isoformat(),
     }
 
 
@@ -3426,7 +3551,10 @@ def build_chat_context(session: Session, session_id: int, content: str, payload:
     chat_session = load_chat_session_model(session, session_id)
     user = chat_session.user
     chart = get_user_chart(session, user.id) or {"birth_profile": None, "chart_snapshot": {}, "warnings": []}
-    memory = list_user_memories(session, user.id) or {"summary": None, "items": []}
+    if payload.get("memory_context_enabled") is False:
+        memory = {"user_id": user.id, "summary": None, "items": []}
+    else:
+        memory = list_user_memories(session, user.id) or {"summary": None, "items": []}
     tags = normalize_tags(payload.get("knowledge_tags") or [])
     knowledge_hits = search_knowledge(session, {"query": content, "tags": tags, "limit": int(payload.get("knowledge_limit") or 5)})
     recent_messages = [

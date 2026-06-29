@@ -615,6 +615,49 @@ confirmed_system=liuyao
 }
 ```
 
+### Agent 反馈
+
+```http
+POST /api/app/agent/messages/{message_id}/feedback
+```
+
+Request：
+
+```json
+{
+  "feedback_type": "like",
+  "target_type": "recommendation",
+  "target_id": "tarot_reading",
+  "metadata": {
+    "clicked_recommendation": "tarot_reading"
+  }
+}
+```
+
+Response：
+
+```json
+{
+  "id": 1,
+  "user_id": 10,
+  "session_id": 20,
+  "message_id": 30,
+  "feedback_type": "like",
+  "target_type": "recommendation",
+  "target_id": "tarot_reading",
+  "metadata": {
+    "clicked_recommendation": "tarot_reading"
+  },
+  "created_at": "2026-06-29T00:00:00+00:00"
+}
+```
+
+推荐用法：
+
+- 用户点赞/点踩回答：`target_type=message`。
+- 用户点击推荐占术/付费报告：`target_type=recommendation`，`target_id` 放推荐项 ID。
+- 用户投诉或标记不准：`feedback_type=dislike` 或 `report`，原因放 `metadata.reason`。
+
 ## 4. 聊天会话
 
 ### 创建聊天会话
@@ -937,6 +980,46 @@ Response：
   ]
 }
 ```
+
+### 删除记忆条目
+
+```http
+DELETE /api/app/users/{user_id}/memories/{memory_id}
+```
+
+说明：后端执行软删除，删除后的条目不会再出现在 `GET /memories` 结果里。
+
+### 记忆设置
+
+```http
+GET /api/app/users/{user_id}/memory-settings
+PUT /api/app/users/{user_id}/memory-settings
+```
+
+`PUT` Request：
+
+```json
+{
+  "memory_enabled": false,
+  "personalization_enabled": false,
+  "retention_days": 30
+}
+```
+
+Response：
+
+```json
+{
+  "user_id": 1,
+  "memory_enabled": false,
+  "personalization_enabled": false,
+  "retention_days": 30,
+  "updated_at": "2026-06-29T00:00:00+00:00"
+}
+```
+
+- `memory_enabled=false`：不再沉淀新记忆。
+- `personalization_enabled=false`：本轮 Agent 不使用长期记忆做个性化。
 
 `embedding` 是后端检索元数据；SQLite 本地可能是 mock，PostgreSQL 生产环境可同步写入 pgvector 列。前端展示时可以忽略。
 

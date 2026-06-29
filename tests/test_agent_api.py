@@ -284,3 +284,74 @@ def test_agent_stream_accepts_query_api_key_and_confirmed_system():
     assert '"selected_system": "liuyao"' in body
     assert "liuyao_reading" in body
     assert "先按六爻判断这件事" in body
+
+
+def test_agent_message_feedback_records_message_context():
+    user = create_agent_user()
+    agent_session = create_agent_session(user["id"], entry_type="free_question")
+    reply_response = client.post(
+        f"/api/app/agent/sessions/{agent_session['id']}/reply",
+        headers=APP_HEADERS,
+        json={"content": "用塔罗看他现在怎么想我？", "simulate_model_response": "先看当下互动。"},
+    )
+    assert reply_response.status_code == 200
+    assistant_message_id = reply_response.json()["messages"]["assistant_message_id"]
+
+    response = client.post(
+        f"/api/app/agent/messages/{assistant_message_id}/feedback",
+        headers=APP_HEADERS,
+        json={
+            "feedback_type": "like",
+            "target_type": "recommendation",
+            "target_id": "tarot_reading",
+            "metadata": {"clicked_recommendation": "tarot_reading"},
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["user_id"] == user["id"]
+    assert data["session_id"] == agent_session["id"]
+    assert data["message_id"] == assistant_message_id
+    assert data["feedback_type"] == "like"
+    assert data["target_type"] == "recommendation"
+    assert data["target_id"] == "tarot_reading"
+    assert data["metadata"]["clicked_recommendation"] == "tarot_reading"
+
+
+def test_agent_message_feedback_requires_existing_message():
+    response = client.post(
+        "/api/app/agent/messages/99999999/feedback",
+        headers=APP_HEADERS,
+        json={"feedback_type": "like"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_agent_reply_respects_user_memory_settings():
+    user = create_agent_user()
+    client.post(
+        f"/api/app/users/{user['id']}/memories",
+        headers=APP_HEADERS,
+        json={"memory_type": "preference", "content": "用户喜欢先给结论。", "importance": 5},
+    )
+    settings_response = client.put(
+        f"/api/app/users/{user['id']}/memory-settings",
+        headers=APP_HEADERS,
+        json={"memory_enabled": False, "personalization_enabled": False},
+    )
+    assert settings_response.status_code == 200
+    agent_session = create_agent_session(user["id"], entry_type="free_question")
+
+    response = client.post(
+        f"/api/app/agent/sessions/{agent_session['id']}/reply",
+        headers=APP_HEADERS,
+        json={"content": "最近合作项目怎么推进？", "simulate_model_response": "先确认边界。"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["memory_used"] == []
+    assert data["memory_updates"]["created_count"] == 0
+    assert data["memory_updates"]["summary_status"] == "skipped"
