@@ -33,8 +33,9 @@
 ## 原始需求
 
 - `requirements/Nexa占卜APP_AI_API管理后台_开发需求文档.md`
+- `requirements/Nexa通用占卜Agent_PRD_V1.md`
 
-原始需求保持归档，不直接覆盖。新增功能和实现说明写入上面的项目文档。
+原始需求保持归档，不直接覆盖。`Nexa通用占卜Agent_PRD_V1.md` 是通用占卜 Agent 后续开发的主产品文档。新增功能和实现说明写入上面的项目文档。
 
 ## 维护规则
 
