@@ -14,3 +14,4 @@ data/
 uploads/
 dist/
 node_modules/
+tmp/

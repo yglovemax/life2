@@ -19,6 +19,13 @@ def test_health_reports_ok():
     assert response.json()["status"] == "ok"
 
 
+def test_agent_page_serves_mobile_customer_experience():
+    response = client.get("/agent")
+    assert response.status_code == 200
+    assert "Nexa Universal Agent" in response.text
+    assert "/static/agent-assets/chart-wheel.png" in response.text
+
+
 def test_runtime_status_exposes_database_and_pgvector_plan():
     response = client.get("/api/runtime/status")
 

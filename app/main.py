@@ -221,6 +221,11 @@ def admin() -> FileResponse:
     return FileResponse(static_dir / "admin.html")
 
 
+@app.get("/agent", response_class=FileResponse)
+def agent() -> FileResponse:
+    return FileResponse(static_dir / "agent.html")
+
+
 @app.get("/api/health")
 def health() -> dict:
     return {"status": "ok", "service": "nexa-ai-api-admin"}

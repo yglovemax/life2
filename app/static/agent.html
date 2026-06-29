@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Nexa Agent</title>
+    <link rel="stylesheet" href="/static/agent.css" />
+  </head>
+  <body>
+    <main class="agent-shell">
+      <section class="app-screen">
+        <header class="agent-header">
+          <div class="status-row">
+            <span>12:00</span>
+            <span class="status-dots">5G 100%</span>
+          </div>
+          <div class="identity-row">
+            <button class="ghost-button" aria-label="返回">‹</button>
+            <div>
+              <p>Nexa Universal Agent</p>
+              <h1>个人占卜 AI</h1>
+            </div>
+            <button class="memory-toggle active" id="memoryToggle" type="button">
+              <span></span>
+              记忆
+            </button>
+          </div>
+          <nav class="system-rail" aria-label="占术选择">
+            <button class="system-chip active" data-system="占星">占星</button>
+            <button class="system-chip" data-system="八字">八字</button>
+            <button class="system-chip" data-system="塔罗">塔罗</button>
+            <button class="system-chip" data-system="六爻">六爻</button>
+            <button class="system-chip" data-system="合盘">合盘</button>
+            <button class="system-chip" data-system="签文">签文</button>
+          </nav>
+        </header>
+
+        <section class="hero-card">
+          <img src="/static/agent-assets/transit-banner.png" alt="行运星象" />
+          <div class="hero-overlay">
+            <p>当前入口</p>
+            <h2>自由提问</h2>
+            <span id="routePill">推荐：占星行运</span>
+          </div>
+        </section>
+
+        <section class="route-card" id="routeCard">
+          <div class="route-copy">
+            <p>占术路由</p>
+            <h3 id="routeTitle">这类近期波动，先用占星行运看</h3>
+            <span id="routeReason">如果你要看对方当下想法，我会建议切到塔罗；如果是具体事件结果，再切六爻。</span>
+          </div>
+          <div class="route-actions">
+            <button class="primary-action" data-action="astrology">继续占星</button>
+            <button data-action="tarot">抽塔罗</button>
+            <button data-action="liuyao">起六爻</button>
+          </div>
+        </section>
+
+        <section class="chart-panel">
+          <div class="chart-image">
+            <img src="/static/agent-assets/chart-wheel.png" alt="星盘轮" />
+          </div>
+          <div class="chart-info">
+            <p>本轮参考</p>
+            <h3>Ding 的本命与近期行运</h3>
+            <span>太阳巨蟹 · 月亮处女 · 上升双子</span>
+          </div>
+        </section>
+
+        <section class="chat-stream" id="chatStream" aria-live="polite">
+          <article class="message user-message">
+            <span>你</span>
+            <p>我最近感情一直不顺，是不是长期运势也不好？</p>
+          </article>
+          <article class="message agent-message">
+            <span>Nexa Agent · 占星行运</span>
+            <p>先给结论：最近更像关系观察期，不是长期运势变差。先稳住节奏，再决定是否切到塔罗。</p>
+          </article>
+        </section>
+
+        <section class="tool-strip" aria-label="推荐工具">
+          <button class="tool-card active" data-tool="塔罗">
+            <img src="/static/agent-assets/tarot-tool.png" alt="塔罗占卜" />
+            <strong>塔罗</strong>
+            <span>看对方想法</span>
+          </button>
+          <button class="tool-card" data-tool="六爻">
+            <img src="/static/agent-assets/liuyao-tool.png" alt="六爻占卜" />
+            <strong>六爻</strong>
+            <span>判断能不能成</span>
+          </button>
+          <button class="tool-card" data-tool="合盘">
+            <img src="/static/agent-assets/synastry-tool.png" alt="关系合盘" />
+            <strong>合盘</strong>
+            <span>长期关系模式</span>
+          </button>
+        </section>
+
+        <section class="preset-panel">
+          <button data-question="今天适合做什么？">今天适合做什么？</button>
+          <button data-question="这段关系怎么走？">这段关系怎么走？</button>
+          <button data-question="我该不该答应这件事？">我该不该答应这件事？</button>
+        </section>
+
+        <form class="composer" id="composer">
+          <input id="agentInput" autocomplete="off" placeholder="问问你的个人占卜 Agent" />
+          <button type="submit">发送</button>
+        </form>
+
+        <nav class="bottom-nav" aria-label="底部导航">
+          <button class="active">Agent</button>
+          <button>Tools</button>
+          <button>Match</button>
+          <button>Chart</button>
+          <button>Me</button>
+        </nav>
+      </section>
+    </main>
+    <script src="/static/agent.js"></script>
+  </body>
+</html>
