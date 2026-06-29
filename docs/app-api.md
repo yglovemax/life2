@@ -217,3 +217,117 @@ POST /api/app/users/{user_id}/chart/calculate
 - `NEXA_BAZI_CALC_MODE=live`
 - `NEXA_BAZI_API_URL`
 - `NEXA_BAZI_API_TOKEN`
+
+## 通用占卜 Agent API
+
+Agent API 是客户侧新的统一入口，复用现有聊天会话和记忆系统，并额外返回占术路由、确认按钮、工具调用协议和推荐结构。
+
+### 创建 Agent 会话
+
+```http
+POST /api/app/agent/sessions
+```
+
+```json
+{
+  "user_id": 1,
+  "entry_type": "preset_question",
+  "entry_context": {
+    "page_slug": "daily-horoscope",
+    "module_slug": "daily-key-transits",
+    "system": "astrology",
+    "preset_question": "这对我有什么影响？"
+  },
+  "title": "这对我有什么影响？"
+}
+```
+
+返回值是 `topic=agent` 的聊天会话，入口上下文保存在 `metadata.agent`。
+
+### 路由预览
+
+```http
+POST /api/app/agent/route-preview
+```
+
+```json
+{
+  "content": "我该不该答应朋友这个具体事情？",
+  "entry_type": "free_question",
+  "entry_context": {
+    "system": "astrology"
+  }
+}
+```
+
+如果自动推荐占术和当前入口不一致，会返回：
+
+```json
+{
+  "route_source": "auto_match",
+  "selected_system": "astrology",
+  "recommended_system": "liuyao",
+  "needs_confirmation": true,
+  "quick_actions": [
+    {
+      "label": "用六爻看",
+      "value": "liuyao"
+    }
+  ]
+}
+```
+
+### Agent 回复
+
+```http
+POST /api/app/agent/sessions/{session_id}/reply
+```
+
+```json
+{
+  "content": "他现在怎么想我？",
+  "memory_enabled": true
+}
+```
+
+重点返回：
+
+```json
+{
+  "status": "ok",
+  "answer": "更适合先用塔罗看当下状态。",
+  "route": {
+    "route_source": "auto_match",
+    "selected_system": "tarot",
+    "recommended_system": "tarot",
+    "needs_confirmation": false
+  },
+  "tool_calls": [
+    {
+      "tool_name": "tarot_reading",
+      "system": "tarot",
+      "data_source": "existing_profile_or_v1_protocol",
+      "status": "ok"
+    }
+  ],
+  "messages": {
+    "user_message_id": 1,
+    "assistant_message_id": 2
+  }
+}
+```
+
+Phase A 已实现：
+
+- 用户明确占术优先。
+- 页面预设问题绑定当前页面体系。
+- 自由提问自动路由。
+- 推荐占术和当前入口不一致时返回 `quick_actions` 等待确认。
+- `tool_calls` 输出标准结构。
+
+Phase B/C 后续继续补：
+
+- Agent 专用 SSE：`route/tool_call/delta/recommendations/memory/done`。
+- 真实塔罗、六爻、合盘、签文工具 provider。
+- Agent feedback API。
+- 记忆开关、删除和更细粒度相关性筛选。

@@ -287,7 +287,195 @@ Response 重点字段：
 - `mode=live`：调用了真实八字算法服务
 - `mode=snapshot`：没有触发远程算法，直接返回当前快照
 
-## 3. 聊天会话
+## 3. 通用占卜 Agent
+
+Agent 是客户侧推荐主入口。它底层复用聊天会话，但会额外返回占术路由、确认按钮、工具调用协议和推荐结构。
+
+### 创建 Agent 会话
+
+```http
+POST /api/app/agent/sessions
+```
+
+自由提问入口：
+
+```json
+{
+  "user_id": 1,
+  "entry_type": "free_question",
+  "entry_context": {
+    "system": "astrology"
+  },
+  "title": "个人占卜 Agent"
+}
+```
+
+页面预设问题入口：
+
+```json
+{
+  "user_id": 1,
+  "entry_type": "preset_question",
+  "entry_context": {
+    "page_slug": "daily-horoscope",
+    "module_slug": "daily-key-transits",
+    "system": "astrology",
+    "preset_question": "这对我有什么影响？",
+    "current_page_data": {}
+  },
+  "title": "这对我有什么影响？"
+}
+```
+
+Response 仍是聊天会话结构，但 `topic=agent`，并在 `metadata.agent` 中保存入口上下文：
+
+```json
+{
+  "id": 10,
+  "user_id": 1,
+  "title": "个人占卜 Agent",
+  "topic": "agent",
+  "metadata": {
+    "agent": {
+      "entry_type": "free_question",
+      "entry_context": {
+        "system": "astrology"
+      },
+      "active_system": "astrology",
+      "last_route": {}
+    }
+  },
+  "messages": []
+}
+```
+
+### 路由预览
+
+```http
+POST /api/app/agent/route-preview
+```
+
+用途：前端输入时预判占术，或者后台/联调验证路由规则。
+
+```json
+{
+  "content": "我该不该答应朋友这个具体事情？",
+  "entry_type": "free_question",
+  "entry_context": {
+    "system": "astrology"
+  }
+}
+```
+
+Response：
+
+```json
+{
+  "entry_type": "free_question",
+  "route_source": "auto_match",
+  "selected_system": "astrology",
+  "recommended_system": "liuyao",
+  "needs_confirmation": true,
+  "reason": "这是具体事件决策问题，更适合用六爻看局势、风险和短期结果。当前入口是占星，所以先不自动切换，等待用户确认。",
+  "quick_actions": [
+    {
+      "label": "用六爻看",
+      "value": "liuyao",
+      "action": {
+        "type": "confirm_route",
+        "payload": {
+          "selected_system": "liuyao"
+        }
+      }
+    }
+  ]
+}
+```
+
+前端规则：
+
+- `needs_confirmation=true` 时必须展示 `quick_actions`。
+- 用户点击快捷按钮后，下一次 reply 带 `confirmed_route.selected_system`。
+- 页面预设问题首轮不会自动切换占术。
+- 用户明确输入“只用八字/用塔罗/起六爻”等，会直接覆盖自动路由。
+
+### Agent 回复
+
+```http
+POST /api/app/agent/sessions/{session_id}/reply
+```
+
+Request：
+
+```json
+{
+  "content": "他现在怎么想我？",
+  "memory_enabled": true
+}
+```
+
+用户点击确认按钮后的 Request：
+
+```json
+{
+  "content": "那就用六爻看",
+  "confirmed_route": {
+    "selected_system": "liuyao"
+  }
+}
+```
+
+Response：
+
+```json
+{
+  "session_id": 10,
+  "status": "ok",
+  "answer": "更适合先用塔罗看当下状态。",
+  "route": {
+    "route_source": "auto_match",
+    "selected_system": "tarot",
+    "recommended_system": "tarot",
+    "needs_confirmation": false
+  },
+  "tool_calls": [
+    {
+      "tool_name": "tarot_reading",
+      "system": "tarot",
+      "data_source": "existing_profile_or_v1_protocol",
+      "needs_birth_info": false,
+      "needs_relation_profile": false,
+      "needs_paid_access": false,
+      "status": "ok"
+    }
+  ],
+  "memory_used": [],
+  "recommendations": [],
+  "messages": {
+    "user_message_id": 1,
+    "assistant_message_id": 2
+  },
+  "memory_updates": {},
+  "context": {},
+  "meta": {
+    "mode": "mock"
+  }
+}
+```
+
+`selected_system` 当前支持：
+
+- `astrology`
+- `bazi`
+- `tarot`
+- `liuyao`
+- `synastry`
+- `oracle`
+- `hybrid_transit`
+
+V1 Phase A 说明：`tarot`、`liuyao`、`synastry`、`oracle` 先返回工具协议占位；真实抽牌、起卦、合盘算法后续接入时保持同一个 `tool_calls` 结构。
+
+## 4. 聊天会话
 
 ### 创建聊天会话
 
@@ -353,7 +541,7 @@ Request：
 - `system`
 - `tool`
 
-## 4. 聊天回复
+## 5. 聊天回复
 
 ### 非流式回复
 
@@ -545,7 +733,7 @@ events.addEventListener("done", (event) => {
 
 如果流式接口命中限流，会直接返回 `429`，并附带同样的 `X-RateLimit-*` 头。前端应做退避，不要立刻重建 `EventSource`。
 
-## 5. 长期记忆
+## 6. 长期记忆
 
 ### 保存长期记忆摘要
 
@@ -612,7 +800,7 @@ Response：
 
 `embedding` 是后端检索元数据；SQLite 本地可能是 mock，PostgreSQL 生产环境可同步写入 pgvector 列。前端展示时可以忽略。
 
-## 6. App 页面/模块渲染
+## 7. App 页面/模块渲染
 
 给前端直接取页面级 AI JSON：
 

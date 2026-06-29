@@ -9,6 +9,7 @@
 ```text
 app/
   main.py                 FastAPI 入口和 HTTP 路由
+  agent.py                通用占卜 Agent V1 编排：占术路由、入口上下文、工具协议和 Agent 回复包装
   services.py             主要业务逻辑和编排
   models.py               SQLAlchemy 模型
   db.py                   数据库引擎、Session、schema 初始化、运行状态
@@ -39,6 +40,7 @@ tests/                    API、服务、平台底座测试
 - 基础：`/api/health`、`/api/runtime/status`
 - 后台登录：`/api/auth/*`
 - App 正式接口：`/api/app/*`
+- App Agent 接口：`/api/app/agent/*`
 - 模块管理：`/api/modules/*`
 - 知识库：`/api/knowledge-*`、`/api/knowledge/*`
 - 算法库：`/api/algorithms/*`
@@ -63,6 +65,7 @@ tests/                    API、服务、平台底座测试
 - embedding：`build_text_embedding_payload`、`apply_text_embedding`、`create_embedding_rebuild_job`、`execute_embedding_rebuild_job`
 - App 用户和盘面：`create_or_update_app_user`、`save_birth_profile`、`get_user_chart`、`calculate_user_chart`
 - 聊天和记忆：`create_chat_session`、`generate_chat_reply`、`create_memory_item`、`execute_memory_summary_job`
+- Agent 编排：`app/agent.py` 复用聊天和记忆服务，负责占术路由、确认按钮、工具调用协议、推荐包装
 - 安全：`login_admin`、`authenticate_admin_token`、`create_app_api_key`、`authenticate_app_token`
 - 模型 Key 和输出策略：`create_model_provider_key`、`revoke_model_provider_key`、`create_output_policy`、`preview_model_route`
 - 指标和审计：`metrics`、`cost_summary`、`list_audit_events`
@@ -144,6 +147,7 @@ tests/                    API、服务、平台底座测试
 - `test_admin_api.py`：后台模块、知识库、发布、模型、成本、安全等主 API。
 - `test_app_user_backend_api.py`：App 用户、本命资料、盘面、聊天基础、记忆基础。
 - `test_chat_reply_api.py`：聊天回复、上下文、模型调用、流式输出。
+- `test_agent_api.py`：Agent 会话、占术路由、确认按钮、工具调用协议和回复包装。
 - `test_auto_memory_extraction.py`：自动记忆抽取和摘要。
 - `test_training_ingestion.py`：训练资料解析和知识检索。
 - `test_training_runs_api.py`：AI 训练运行、发布、失败、重试、取消、队列。
@@ -154,6 +158,7 @@ tests/                    API、服务、平台底座测试
 ## 新增功能落点规则
 
 - 给 App 前端用的接口：放 `/api/app/*`，更新 `frontend-api-contract.md` 和 `app-api.md`。
+- Agent 相关接口：放 `/api/app/agent/*`，业务逻辑优先放 `app/agent.py`，不要把占术路由规则塞进旧聊天函数里。
 - 给后台管理用的接口：放对应管理分组，更新 `backend-integration.md`。
 - 新增长期运行任务：使用 `TaskEnvelope`，在 `worker.py` 注册 handler。
 - 新增配置：放 `app/core/settings.py`，文档写 README 和相关专题文档。

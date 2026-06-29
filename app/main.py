@@ -95,6 +95,11 @@ from app.services import (
     run_algorithm_test,
     upload_algorithm_files,
 )
+from app.agent import (
+    create_agent_session,
+    generate_agent_reply,
+    preview_agent_route,
+)
 
 
 def bootstrap() -> None:
@@ -446,6 +451,44 @@ def app_chat_session_reply(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if reply is None:
         raise HTTPException(status_code=404, detail="chat session not found")
+    return reply
+
+
+@app.post("/api/app/agent/sessions")
+def app_agent_session_create(
+    payload: dict,
+    _: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    chat_session = create_agent_session(session, payload)
+    if chat_session is None:
+        raise HTTPException(status_code=404, detail="app user not found")
+    return chat_session
+
+
+@app.post("/api/app/agent/route-preview")
+def app_agent_route_preview(
+    payload: dict,
+    _: dict = Depends(require_app_token),
+) -> dict:
+    return preview_agent_route(payload)
+
+
+@app.post("/api/app/agent/sessions/{session_id}/reply")
+def app_agent_session_reply(
+    session_id: int,
+    payload: dict,
+    response: Response,
+    auth: dict = Depends(require_app_token),
+    session: Session = Depends(get_session),
+) -> dict:
+    enforce_app_chat_rate_limit(auth, session_id, response=response)
+    try:
+        reply = generate_agent_reply(session, session_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if reply is None:
+        raise HTTPException(status_code=404, detail="agent session not found")
     return reply
 
 
